@@ -476,6 +476,13 @@ if not st.session_state.tape_id:
                         st.session_state.filename = t["filename"]
                         st.session_state.analysis = client.get_analysis(t["id"])
                         st.session_state.validation = client.get_validation(t["id"])
+                        # Load raw data into df
+                        try:
+                            import io
+                            csv_text = client.export_csv(t["id"])
+                            st.session_state.df = pd.read_csv(io.StringIO(csv_text))
+                        except:
+                            st.session_state.df = None
                         st.rerun()
             if not tapes:
                 st.markdown('<span style="color:#566375;font-size:11px">No tapes yet.</span>', unsafe_allow_html=True)
