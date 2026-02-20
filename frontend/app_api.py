@@ -470,7 +470,7 @@ if not st.session_state.tape_id:
                 with c1: st.markdown(f'<span style="color:#E8ECF1;font-weight:600">{t["filename"]}</span>', unsafe_allow_html=True)
                 with c2: st.markdown(f'<span style="color:#8494A7;font-size:11px">{t["row_count"]:,} rows</span>', unsafe_allow_html=True)
                 with c3:
-                    if st.button("Open", key=f"o_{t['id']}", use_container_width=True):
+                    if st.button("→", key=f"o_{t['id']}", use_container_width=True):
                         st.session_state.tape_id = t["id"]
                         st.session_state.tape = t
                         st.session_state.filename = t["filename"]
@@ -1250,6 +1250,13 @@ elif page == "📋 Column Mapping":
     st.markdown(f'<span style="color:#566375;font-size:11px">Add as custom field with optional synonyms for future auto-matching.</span>', unsafe_allow_html=True)
 
     if unmapped_cols:
+        # Header row
+        uh1, uh2, uh3, uh4 = st.columns([2, 2, 2, 1])
+        with uh1: st.markdown('<span style="color:#8494A7;font-size:10px">COLUMN</span>', unsafe_allow_html=True)
+        with uh2: st.markdown('<span style="color:#8494A7;font-size:10px">SYNONYMS (optional)</span>', unsafe_allow_html=True)
+        with uh3: st.markdown('<span style="color:#8494A7;font-size:10px">DISPLAY LABEL</span>', unsafe_allow_html=True)
+        with uh4: st.markdown('<span style="color:#8494A7;font-size:10px"></span>', unsafe_allow_html=True)
+
         for col_name in unmapped_cols:
             if st.session_state.df is not None:
                 samples = st.session_state.df[col_name].dropna().head(3).tolist()
@@ -1263,12 +1270,12 @@ elif page == "📋 Column Mapping":
                     st.markdown(f'<span style="color:#E8ECF1;font-size:12px;font-weight:600">{col_name}</span><br><span style="color:#566375;font-size:10px">{sample_str}</span>', unsafe_allow_html=True)
                 with uc2:
                     syn_key = f"syn_{col_name}"
-                    synonyms = st.text_input("Synonyms", placeholder="e.g. make, manufacturer", key=syn_key, label_visibility="collapsed")
+                    synonyms = st.text_input("Synonyms", placeholder="alt names, comma separated", key=syn_key, label_visibility="collapsed")
                 with uc3:
                     label_key = f"lbl_{col_name}"
                     custom_label = st.text_input("Label", placeholder=col_name, key=label_key, label_visibility="collapsed")
                 with uc4:
-                    if st.button("➕ Add", key=f"qa_{col_name}", use_container_width=True):
+                    if st.button("➕", key=f"qa_{col_name}", use_container_width=True):
                         key = col_name.lower().replace(" ", "_").replace("-", "_")
                         if key in all_flds:
                             key = key + "_custom"
