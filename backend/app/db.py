@@ -26,6 +26,10 @@ async def get_db():
 
 
 async def init_db():
-    """Create all tables."""
+    """Drop and recreate all tables (safe for fresh deploys)."""
+    import os
+    if os.getenv("RESET_DB", "").lower() in ("1", "true", "yes"):
+        async with engine.begin() as conn:
+            await conn.run_sync(Base.metadata.drop_all)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)

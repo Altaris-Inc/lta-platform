@@ -41,7 +41,7 @@ class Tape(Base):
     analysis = Column(JSON, nullable=True)         # cached analysis results
     validation = Column(JSON, nullable=True)       # cached validation results
     created_at = Column(DateTime(timezone=True), default=utcnow)
-    updated_at = Column(DateTime, default=utcnow, onupdate=utcnow)
+    updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
     user = relationship("User", back_populates="tapes")
 
