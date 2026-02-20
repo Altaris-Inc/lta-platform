@@ -364,11 +364,20 @@ if not st.session_state.api_key:
             if st.button("Register", use_container_width=True) and rn and re_:
                 try:
                     u = LTAClient().create_user(rn, re_)
-                    st.session_state.api_key = u["api_key"]
-                    st.success(f"✅ Your API key: `{u['api_key']}`")
-                    st.info("Save this key! You need it to log in.")
+                    st.session_state["_new_api_key"] = u["api_key"]
                     st.rerun()
                 except Exception as e: st.error(f"Failed: {e}")
+
+            # Show key after registration
+            if st.session_state.get("_new_api_key"):
+                new_key = st.session_state["_new_api_key"]
+                st.success("✅ Registration successful!")
+                st.code(new_key, language=None)
+                st.warning("⚠️ Copy and save this API key! It won't be shown again.")
+                if st.button("✅ I've saved my key — Continue", use_container_width=True):
+                    st.session_state.api_key = new_key
+                    del st.session_state["_new_api_key"]
+                    st.rerun()
     st.stop()
 
 client = get_client()
