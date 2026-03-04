@@ -255,8 +255,7 @@ def chart_with_drilldown(data, title, color, chart_key, df_raw, mp, grid_prefix)
         if df_raw is not None and bal_col and bal_col in df_raw.columns:
             filtered, _ = _filter_bucket(df_raw, mp, bucket)
             if filtered is not None and len(filtered) > 0:
-                from logic import parse_numeric
-                bals = filtered[bal_col].apply(parse_numeric).dropna()
+                bals = pd.to_numeric(filtered[bal_col].astype(str).str.replace(r'[$,%\s]', '', regex=True), errors='coerce').dropna()
                 if len(bals) > 0:
                     b["avg_bal"] = float(bals.mean())
                     b["min_bal"] = float(bals.min())
