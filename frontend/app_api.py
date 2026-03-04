@@ -415,16 +415,31 @@ if not st.session_state.tape_id:
         st.markdown('<p style="text-align:center;color:#8494A7;font-size:13px">Upload a CSV loan tape to begin analysis</p>', unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        uploaded = st.file_uploader("Upload CSV", type=["csv","tsv"], label_visibility="collapsed")
+        uploaded = st.file_uploader("Upload CSV", type=["csv","tsv","xlsx","xls"], label_visibility="collapsed")
         if uploaded:
             with st.spinner("Uploading & analyzing..."):
-                csv_bytes = uploaded.read()
-                tape = client.upload_tape(uploaded.name, csv_bytes)
+                name = uploaded.name
+                if name.endswith((".xlsx", ".xls")):
+                    # Convert Excel to CSV
+                    import io
+                    try:
+                        import openpyxl
+                    except ImportError:
+                        pass
+                    excel_df = pd.read_excel(uploaded)
+                    csv_buf = io.BytesIO()
+                    excel_df.to_csv(csv_buf, index=False)
+                    csv_bytes = csv_buf.getvalue()
+                    name = name.rsplit(".", 1)[0] + ".csv"
+                    st.session_state.df = excel_df
+                else:
+                    csv_bytes = uploaded.read()
+                    uploaded.seek(0)
+                    st.session_state.df = pd.read_csv(uploaded)
+                tape = client.upload_tape(name, csv_bytes)
                 st.session_state.tape_id = tape["id"]
                 st.session_state.tape = tape
                 st.session_state.filename = tape["filename"]
-                uploaded.seek(0)
-                st.session_state.df = pd.read_csv(uploaded)
                 # Auto-run rule-based match
                 try:
                     updated = client.auto_match(tape["id"], mode="rule")
@@ -465,7 +480,7 @@ if not st.session_state.tape_id:
         try:
             tapes = client.list_tapes()
             for t in tapes:
-                c1, c2, c3 = st.columns([3,2,1])
+                c1, c2, c3, c4 = st.columns([3, 2, 0.5, 0.5])
                 with c1: st.markdown(f'<span style="color:#E8ECF1;font-weight:600">{t["filename"]}</span>', unsafe_allow_html=True)
                 with c2: st.markdown(f'<span style="color:#8494A7;font-size:11px">{t["row_count"]:,} rows</span>', unsafe_allow_html=True)
                 with c3:
@@ -482,6 +497,12 @@ if not st.session_state.tape_id:
                             st.session_state.df = pd.read_csv(io.StringIO(csv_text))
                         except:
                             st.session_state.df = None
+                        st.rerun()
+                with c4:
+                    if st.button("🗑", key=f"d_{t['id']}", use_container_width=True):
+                        try:
+                            client.delete_tape(t["id"])
+                        except: pass
                         st.rerun()
             if not tapes:
                 st.markdown('<span style="color:#566375;font-size:11px">No tapes yet.</span>', unsafe_allow_html=True)
