@@ -425,7 +425,7 @@ class TestValidation:
         assert vl["oor_count"] == 2
 
     def test_detects_oor_dti(self):
-        df = pd.DataFrame([{"DTI": 200}, {"DTI": -10}, {"DTI": 35}])
+        df = pd.DataFrame([{"DTI": 250}, {"DTI": -10}, {"DTI": 35}])
         vl = validate(df, {"dti": "DTI"})
         assert vl["oor_count"] == 2
 
