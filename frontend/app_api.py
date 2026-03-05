@@ -415,13 +415,18 @@ if not st.session_state.tape_id:
         st.markdown('<p style="text-align:center;color:#8494A7;font-size:13px">Upload a CSV loan tape to begin analysis</p>', unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
-        uploaded = st.file_uploader("Upload CSV", type=["csv","tsv","xlsx","xls"], label_visibility="collapsed")
-        if uploaded:
-            with st.spinner("Uploading & analyzing..."):
+        uploaded_files = st.file_uploader("Upload CSV", type=["csv","tsv","xlsx","xls"],
+                                         label_visibility="collapsed", accept_multiple_files=True)
+        if uploaded_files:
+            import io
+            total = len(uploaded_files)
+            progress = st.progress(0, text=f"Uploading 0/{total}...")
+            last_tape = None
+            last_df = None
+            for idx, uploaded in enumerate(uploaded_files):
+                progress.progress((idx) / total, text=f"Uploading {idx+1}/{total}: {uploaded.name}")
                 name = uploaded.name
                 if name.endswith((".xlsx", ".xls")):
-                    # Convert Excel to CSV
-                    import io
                     try:
                         import openpyxl
                     except ImportError:
@@ -431,22 +436,27 @@ if not st.session_state.tape_id:
                     excel_df.to_csv(csv_buf, index=False)
                     csv_bytes = csv_buf.getvalue()
                     name = name.rsplit(".", 1)[0] + ".csv"
-                    st.session_state.df = excel_df
+                    last_df = excel_df
                 else:
                     csv_bytes = uploaded.read()
                     uploaded.seek(0)
-                    st.session_state.df = pd.read_csv(uploaded)
+                    last_df = pd.read_csv(uploaded)
+                    name = uploaded.name
                 tape = client.upload_tape(name, csv_bytes)
-                st.session_state.tape_id = tape["id"]
-                st.session_state.tape = tape
-                st.session_state.filename = tape["filename"]
                 # Auto-run rule-based match
                 try:
-                    updated = client.auto_match(tape["id"], mode="rule")
-                    st.session_state.tape = updated
+                    tape = client.auto_match(tape["id"], mode="rule")
                 except: pass
-                st.session_state.analysis = client.get_analysis(tape["id"])
-                st.session_state.validation = client.get_validation(tape["id"])
+                last_tape = tape
+
+            progress.progress(1.0, text=f"✅ {total} tape{'s' if total > 1 else ''} uploaded!")
+            # Open the last uploaded tape
+            st.session_state.tape_id = last_tape["id"]
+            st.session_state.tape = last_tape
+            st.session_state.filename = last_tape["filename"]
+            st.session_state.df = last_df
+            st.session_state.analysis = client.get_analysis(last_tape["id"])
+            st.session_state.validation = client.get_validation(last_tape["id"])
             st.rerun()
 
         st.markdown("<br>", unsafe_allow_html=True)
@@ -479,8 +489,23 @@ if not st.session_state.tape_id:
         st.markdown("**Previous Tapes:**")
         try:
             tapes = client.list_tapes()
+
+            # Merge mode toggle
+            if len(tapes) >= 2:
+                merge_mode = st.checkbox("Select tapes to merge", key="_merge_mode")
+            else:
+                merge_mode = False
+
+            selected_for_merge = []
+
             for t in tapes:
-                c1, c2, c3, c4 = st.columns([3, 2, 0.5, 0.5])
+                if merge_mode:
+                    mc, c1, c2, c3, c4 = st.columns([0.3, 3, 2, 0.5, 0.5])
+                    with mc:
+                        if st.checkbox("", key=f"sel_{t['id']}", label_visibility="collapsed"):
+                            selected_for_merge.append(t)
+                else:
+                    c1, c2, c3, c4 = st.columns([3, 2, 0.5, 0.5])
                 with c1: st.markdown(f'<span style="color:#E8ECF1;font-weight:600">{t["filename"]}</span>', unsafe_allow_html=True)
                 with c2: st.markdown(f'<span style="color:#8494A7;font-size:11px">{t["row_count"]:,} rows</span>', unsafe_allow_html=True)
                 with c3:
@@ -490,11 +515,10 @@ if not st.session_state.tape_id:
                         st.session_state.filename = t["filename"]
                         st.session_state.analysis = client.get_analysis(t["id"])
                         st.session_state.validation = client.get_validation(t["id"])
-                        # Load raw data into df
                         try:
-                            import io
+                            import io as _io
                             csv_text = client.export_csv(t["id"])
-                            st.session_state.df = pd.read_csv(io.StringIO(csv_text))
+                            st.session_state.df = pd.read_csv(_io.StringIO(csv_text))
                         except:
                             st.session_state.df = None
                         st.rerun()
@@ -504,6 +528,47 @@ if not st.session_state.tape_id:
                             client.delete_tape(t["id"])
                         except: pass
                         st.rerun()
+
+            # Merge button
+            if merge_mode and len(selected_for_merge) >= 2:
+                import io as _io
+                total_rows = sum(t["row_count"] for t in selected_for_merge)
+                st.markdown(f'<span style="color:#00D4AA;font-size:12px">{len(selected_for_merge)} tapes selected · {total_rows:,} total rows</span>', unsafe_allow_html=True)
+
+                merge_name = st.text_input("Merged tape name", value=f"merged_{len(selected_for_merge)}_tapes.csv", key="_merge_name")
+                if st.button(f"🔗 Merge {len(selected_for_merge)} Tapes", type="primary", use_container_width=True):
+                    with st.spinner(f"Merging {len(selected_for_merge)} tapes..."):
+                        dfs = []
+                        for t in selected_for_merge:
+                            try:
+                                csv_text = client.export_csv(t["id"])
+                                df_part = pd.read_csv(_io.StringIO(csv_text))
+                                df_part["_source_file"] = t["filename"]
+                                dfs.append(df_part)
+                            except Exception as e:
+                                st.warning(f"Failed to load {t['filename']}: {e}")
+
+                        if dfs:
+                            merged_df = pd.concat(dfs, ignore_index=True)
+                            csv_buf = _io.BytesIO()
+                            merged_df.to_csv(csv_buf, index=False)
+                            csv_bytes = csv_buf.getvalue()
+
+                            tape = client.upload_tape(merge_name, csv_bytes)
+                            try:
+                                tape = client.auto_match(tape["id"], mode="rule")
+                            except: pass
+
+                            st.session_state.tape_id = tape["id"]
+                            st.session_state.tape = tape
+                            st.session_state.filename = tape["filename"]
+                            st.session_state.df = merged_df
+                            st.session_state.analysis = client.get_analysis(tape["id"])
+                            st.session_state.validation = client.get_validation(tape["id"])
+                            st.rerun()
+            elif merge_mode and len(selected_for_merge) < 2:
+                st.markdown('<span style="color:#566375;font-size:11px">Select 2+ tapes to merge</span>', unsafe_allow_html=True)
+
             if not tapes:
                 st.markdown('<span style="color:#566375;font-size:11px">No tapes yet.</span>', unsafe_allow_html=True)
         except: pass
