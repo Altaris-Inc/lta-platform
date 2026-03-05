@@ -4,6 +4,7 @@ Loan Tape Analyzer — FastAPI Backend
 Run: uvicorn app.main:app --reload
 """
 import io
+import os
 import pandas as pd
 import numpy as np
 from fastapi import FastAPI, Depends, UploadFile, File, HTTPException, Header, Query
@@ -59,14 +60,39 @@ async def get_current_user(
     return user
 
 
-# ── Tape data cache (in-memory per process — production should use Redis) ──
+# ── Tape data storage (disk + in-memory cache) ──
+UPLOAD_DIR = os.path.join(os.path.dirname(__file__), "..", "uploads")
+os.makedirs(UPLOAD_DIR, exist_ok=True)
+
 _tape_cache: dict[str, pd.DataFrame] = {}
 
 
+def _save_tape_df(tape_id: str, df: pd.DataFrame):
+    """Save tape data to disk and cache."""
+    path = os.path.join(UPLOAD_DIR, f"{tape_id}.csv")
+    df.to_csv(path, index=False)
+    _tape_cache[tape_id] = df
+
+
 def _get_tape_df(tape_id: str) -> pd.DataFrame:
-    if tape_id not in _tape_cache:
-        raise HTTPException(404, "Tape data not in memory. Re-upload the file.")
-    return _tape_cache[tape_id]
+    """Load tape data from cache or disk."""
+    if tape_id in _tape_cache:
+        return _tape_cache[tape_id]
+    # Try loading from disk
+    path = os.path.join(UPLOAD_DIR, f"{tape_id}.csv")
+    if os.path.exists(path):
+        df = pd.read_csv(path)
+        _tape_cache[tape_id] = df
+        return df
+    raise HTTPException(404, "Tape data not found. Re-upload the file.")
+
+
+def _delete_tape_df(tape_id: str):
+    """Remove tape data from cache and disk."""
+    _tape_cache.pop(tape_id, None)
+    path = os.path.join(UPLOAD_DIR, f"{tape_id}.csv")
+    if os.path.exists(path):
+        os.remove(path)
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -138,7 +164,7 @@ async def upload_tape(
     await db.commit()
     await db.refresh(tape)
 
-    _tape_cache[tape.id] = df
+    _save_tape_df(tape.id, df)
     return tape
 
 
@@ -181,7 +207,7 @@ async def delete_tape(
         delete(Tape).where(Tape.id == tape_id, Tape.user_id == user.id)
     )
     await db.commit()
-    _tape_cache.pop(tape_id, None)
+    _delete_tape_df(tape_id)
     return {"ok": True}
 
 
