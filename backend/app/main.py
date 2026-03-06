@@ -159,12 +159,15 @@ async def upload_tape(
     processing_log = None
     if tape_info["type"] == "longitudinal":
         latest, full_ts, log = process_longitudinal(df, mapping)
-        analysis_df = latest
+        analysis_df = latest       # use latest snapshot for pool-level metrics
         processing_log = log
-        # Save full time-series separately
-        _save_tape_df(f"ts_{file.filename}_{len(df)}", full_ts)
+        # Save full time-series (all rows + derived columns) as the tape data
+        # so exports and previews return every row, not just latest per loan
+        tape_df_to_save = full_ts
+    else:
+        tape_df_to_save = df
 
-    # Run analysis on the appropriate df (latest snapshot for longitudinal, full for static)
+    # Run analysis on latest snapshot (for longitudinal) or full df (for static)
     an = analyze(analysis_df, mapping)
     vl = validate(analysis_df, mapping)
 
@@ -175,8 +178,8 @@ async def upload_tape(
 
     tape = Tape(
         user_id=user.id, filename=file.filename,
-        row_count=len(analysis_df), col_count=len(hdrs),
-        headers=list(analysis_df.columns),  # may include derived columns
+        row_count=len(tape_df_to_save), col_count=len(hdrs),
+        headers=list(tape_df_to_save.columns),  # includes derived columns
         mapping=mapping,
         analysis=an, validation=vl,
     )
@@ -184,7 +187,7 @@ async def upload_tape(
     await db.commit()
     await db.refresh(tape)
 
-    _save_tape_df(tape.id, analysis_df)
+    _save_tape_df(tape.id, tape_df_to_save)  # save full rows including derived cols
     return tape
 
 
