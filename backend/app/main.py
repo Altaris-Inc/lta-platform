@@ -22,7 +22,9 @@ from app.schemas import (
     AnalysisOut, ValidationOut, RegressionRequest, RegressionOut,
 )
 from app.logic import (
-    STD_FIELDS, rule_match, score_template, analyze, validate,
+    STD_FIELDS, FIELD_TIERS, CANONICAL_FIELDS, EXTENDED_FIELDS, OPTIONAL_FIELDS, LONGITUDINAL_FIELDS,
+    rule_match, score_template, analyze, validate,
+    detect_tape_type, process_longitudinal,
     parse_numeric, calc_regression, calc_multi_regression,
 )
 
@@ -119,7 +121,7 @@ async def upload_tape(
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
-    """Upload a CSV loan tape. Auto-matches columns and caches data."""
+    """Upload a CSV loan tape. Auto-matches columns, detects type, processes longitudinal."""
     content = await file.read()
     df = pd.read_csv(io.BytesIO(content))
     hdrs = list(df.columns)
@@ -140,7 +142,6 @@ async def upload_tape(
     if best_tpl and best_score >= 0.8:
         mapping = {k: v for k, v in best_tpl.mapping.items() if v in hdrs}
     else:
-        # Get user's custom fields
         cf_result = await db.execute(
             select(CustomField).where(CustomField.user_id == user.id)
         )
@@ -150,21 +151,40 @@ async def upload_tape(
             fields[cf.key] = {"label": cf.label, "patterns": cf.patterns}
         mapping = rule_match(df, fields)
 
-    # Run analysis
-    an = analyze(df, mapping)
-    vl = validate(df, mapping)
+    # Detect tape type
+    tape_info = detect_tape_type(df, mapping)
+    analysis_df = df
+
+    # Process longitudinal tapes
+    processing_log = None
+    if tape_info["type"] == "longitudinal":
+        latest, full_ts, log = process_longitudinal(df, mapping)
+        analysis_df = latest
+        processing_log = log
+        # Save full time-series separately
+        _save_tape_df(f"ts_{file.filename}_{len(df)}", full_ts)
+
+    # Run analysis on the appropriate df (latest snapshot for longitudinal, full for static)
+    an = analyze(analysis_df, mapping)
+    vl = validate(analysis_df, mapping)
+
+    # Store tape type info in analysis
+    an["tape_type"] = tape_info
+    if processing_log:
+        an["processing_log"] = processing_log
 
     tape = Tape(
         user_id=user.id, filename=file.filename,
-        row_count=len(df), col_count=len(hdrs),
-        headers=hdrs, mapping=mapping,
+        row_count=len(analysis_df), col_count=len(hdrs),
+        headers=list(analysis_df.columns),  # may include derived columns
+        mapping=mapping,
         analysis=an, validation=vl,
     )
     db.add(tape)
     await db.commit()
     await db.refresh(tape)
 
-    _save_tape_df(tape.id, df)
+    _save_tape_df(tape.id, analysis_df)
     return tape
 
 
@@ -478,6 +498,7 @@ async def health():
 
 @app.get("/api/fields/standard", tags=["Custom Fields"])
 async def list_standard_fields():
-    """List all 47 built-in standard fields."""
-    return {k: {"label": v["label"], "pattern_count": len(v["patterns"])}
+    """List all built-in standard fields with tier classification."""
+    return {k: {"label": v["label"], "pattern_count": len(v["patterns"]),
+                "tier": FIELD_TIERS.get(k, "optional")}
             for k, v in STD_FIELDS.items()}

@@ -649,6 +649,25 @@ if page == "📊 Pool Overview":
         st.info("Upload a tape first.")
     else:
         st.markdown('<div class="section-header">Pool Overview</div>', unsafe_allow_html=True)
+
+        # Tape type indicator
+        tape_info = an.get("tape_type", {})
+        if tape_info.get("type") == "longitudinal":
+            dr = tape_info.get("date_range", {}) or {}
+            date_str = f" · {dr.get('min','?')} → {dr.get('max','?')}" if dr else ""
+            st.markdown(
+                f'<div style="background:#1A2332;border:1px solid #00D4AA;border-radius:8px;padding:10px 16px;margin-bottom:12px">'
+                f'<span style="color:#00D4AA;font-weight:600">📊 Longitudinal Tape</span> · '
+                f'<span style="color:#8494A7">{tape_info.get("unique_loans",0):,} loans · '
+                f'{tape_info.get("periods",0)} periods{date_str} · '
+                f'Latest snapshot used for analysis</span></div>',
+                unsafe_allow_html=True)
+            proc_log = an.get("processing_log", [])
+            if proc_log:
+                with st.expander("🔧 Processing Log", expanded=False):
+                    for entry in proc_log:
+                        st.markdown(f'<span style="color:#8494A7;font-size:11px">• {entry}</span>', unsafe_allow_html=True)
+
         m1,m2,m3,m4,m5,m6 = st.columns(6)
         with m1: card("Total Loans", f"{an['N']:,}")
         with m2: card("Total Balance", fmt_c(an["tb"]))
@@ -1150,6 +1169,7 @@ elif page == "🛡️ Risk Summary":
 elif page == "📋 Column Mapping":
     st.markdown('<div class="section-header">Column Mapping</div>', unsafe_allow_html=True)
     st.markdown(f'<span style="color:#566375;font-size:11px">{len(mp)} fields mapped · {len(hdrs)} source columns</span>', unsafe_allow_html=True)
+    st.markdown('<span style="color:#566375;font-size:10px">🔴 Canonical · 🟠 Extended · 🟢 Optional · 🔵 Longitudinal</span>', unsafe_allow_html=True)
 
     # ── Templates + Actions in one row ──
     try:
@@ -1267,13 +1287,22 @@ elif page == "📋 Column Mapping":
         mapped_keys = sorted(mapped_fields.keys())
         mid = (len(mapped_keys) + 1) // 2
 
+        # Tier badge helper
+        def _tier_icon(fk):
+            tier = std_fields.get(fk, {}).get("tier", "")
+            if tier == "canonical": return "🔴"
+            if tier == "extended": return "🟠"
+            if tier == "longitudinal": return "🔵"
+            return "🟢"
+
         for i, fk in enumerate(mapped_keys):
             container = col_l if i < mid else col_r
             with container:
                 label = mapped_fields[fk]
                 current = mp.get(fk, "")
                 default_idx = options.index(current) if current in options else 0
-                sel = st.selectbox(f"🟢 {label}", options, index=default_idx, key=f"m_{fk}")
+                icon = _tier_icon(fk)
+                sel = st.selectbox(f"{icon} {label}", options, index=default_idx, key=f"m_{fk}")
                 if sel == "— (unmapped)":
                     if fk in new_mp:
                         del new_mp[fk]

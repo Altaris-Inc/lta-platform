@@ -11,47 +11,56 @@ import pandas as pd
 from typing import Optional
 
 # ═══════════════════════════════════════════════════════════════
-# STANDARD FIELDS — 47 ABS fields with regex patterns
+# STANDARD FIELDS — Tiered: Canonical (10) + Extended (20) + Optional + Longitudinal
 # ═══════════════════════════════════════════════════════════════
 
-STD_FIELDS = {
+# Tier 1: Canonical — always expected, core to every tape
+CANONICAL_FIELDS = {
     "loan_id":              {"label": "Loan ID",       "patterns": [r"loan.?id", r"account.?(id|num|no)", r"^id$"]},
-    "original_balance":     {"label": "Orig Bal",      "patterns": [r"orig.?(bal|amount|principal)", r"loan.?amount", r"funded"]},
     "current_balance":      {"label": "Curr Bal",      "patterns": [r"curr.?bal", r"current.?(bal|amount)", r"^upb$", r"outstanding"]},
+    "original_balance":     {"label": "Orig Bal",      "patterns": [r"orig.?(bal|amount|principal)", r"loan.?amount", r"funded"]},
     "interest_rate":        {"label": "Rate",           "patterns": [r"interest.?rate", r"^rate$", r"coupon", r"^apr$"]},
+    "fico_origination":     {"label": "FICO Orig",     "patterns": [r"fico.?orig", r"orig.?fico", r"orig.?score"]},
+    "loan_status":          {"label": "Status",         "patterns": [r"loan.?status", r"^status$"]},
+    "origination_date":     {"label": "Orig Date",     "patterns": [r"orig.?date", r"origination", r"issue.?date"]},
+    "state":                {"label": "State",          "patterns": [r"state", r"borrower.?state"]},
+    "dti":                  {"label": "DTI",            "patterns": [r"^dti", r"debt.?to.?income", r"dti.?back"]},
+    "monthly_payment":      {"label": "Mo Pmt",        "patterns": [r"monthly.?pay", r"installment", r"^pmt$"]},
+}
+
+# Tier 2: Extended Standard — commonly available, part of standard template
+EXTENDED_FIELDS = {
     "original_term":        {"label": "Orig Term",     "patterns": [r"orig.?term", r"^term$", r"loan.?term"]},
     "remaining_term":       {"label": "Rem Term",      "patterns": [r"remain.?term", r"rem.?term"]},
-    "monthly_payment":      {"label": "Mo Pmt",        "patterns": [r"monthly.?pay", r"installment", r"^pmt$"]},
-    "fico_origination":     {"label": "FICO Orig",     "patterns": [r"fico.?orig", r"orig.?fico", r"orig.?score"]},
     "fico_current":         {"label": "FICO Curr",     "patterns": [r"fico.?curr", r"curr.?fico", r"fico$", r"credit.?score$"]},
-    "dti":                  {"label": "DTI",            "patterns": [r"^dti", r"debt.?to.?income", r"dti.?back"]},
-    "loan_status":          {"label": "Status",         "patterns": [r"loan.?status", r"^status$"]},
     "dpd":                  {"label": "DPD",            "patterns": [r"days.?past", r"^dpd$"]},
     "dpd_bucket":           {"label": "DPD Bucket",    "patterns": [r"dpd.?bucket"]},
     "times_30dpd":          {"label": "30DPD Ct",      "patterns": [r"times.?30"]},
     "times_60dpd":          {"label": "60DPD Ct",      "patterns": [r"times.?60"]},
     "times_90dpd":          {"label": "90DPD Ct",      "patterns": [r"times.?90"]},
-    "origination_date":     {"label": "Orig Date",     "patterns": [r"orig.?date", r"origination", r"issue.?date"]},
     "loan_purpose":         {"label": "Purpose",        "patterns": [r"purpose"]},
-    "state":                {"label": "State",          "patterns": [r"state", r"borrower.?state"]},
     "annual_income":        {"label": "Annual Inc",    "patterns": [r"annual.?income", r"gross.?income"]},
     "monthly_income":       {"label": "Mo Inc",        "patterns": [r"monthly.?income"]},
-    "employment_status":    {"label": "Empl",           "patterns": [r"employ.?status"]},
-    "employment_length":    {"label": "Empl Yrs",      "patterns": [r"employ.?length"]},
     "grade":                {"label": "Grade",          "patterns": [r"^grade$", r"^sub.?grade$"]},
     "origination_channel":  {"label": "Channel",        "patterns": [r"channel", r"orig.?channel"]},
     "income_verification":  {"label": "Inc Verif",     "patterns": [r"income.?verif", r"verif.?status"]},
+    "months_on_book":       {"label": "MOB",            "patterns": [r"months.?on.?book", r"loan.?age", r"^mob$"]},
+    "vintage":              {"label": "Vintage",        "patterns": [r"vintage", r"cohort", r"orig.?year"]},
+    "total_paid_principal":  {"label": "Princ Paid",   "patterns": [r"total.?princ.?paid", r"principal.?paid"]},
+    "total_paid_interest":   {"label": "Int Paid",     "patterns": [r"total.?int.?paid", r"interest.?paid"]},
+    "net_loss":             {"label": "Net Loss",      "patterns": [r"net.?loss", r"write.?off"]},
+    "recoveries":           {"label": "Recoveries",    "patterns": [r"recover"]},
+}
+
+# Tier 3: Optional — nice to have, varies by originator
+OPTIONAL_FIELDS = {
+    "employment_status":    {"label": "Empl",           "patterns": [r"employ.?status"]},
+    "employment_length":    {"label": "Empl Yrs",      "patterns": [r"employ.?length"]},
     "housing_status":       {"label": "Housing",        "patterns": [r"housing", r"home.?own"]},
     "open_accounts":        {"label": "Open Accts",    "patterns": [r"open.?(acc|credit|lines)"]},
     "revolving_utilization":{"label": "Rev Util",      "patterns": [r"revolv.?util"]},
-    "total_paid_principal":  {"label": "Princ Paid",   "patterns": [r"total.?princ.?paid", r"principal.?paid"]},
-    "total_paid_interest":   {"label": "Int Paid",     "patterns": [r"total.?int.?paid", r"interest.?paid"]},
     "origination_fee":      {"label": "Orig Fee",      "patterns": [r"orig.?fee"]},
     "late_fees":            {"label": "Late Fees",     "patterns": [r"late.?fee"]},
-    "recoveries":           {"label": "Recoveries",    "patterns": [r"recover"]},
-    "net_loss":             {"label": "Net Loss",      "patterns": [r"net.?loss", r"write.?off"]},
-    "months_on_book":       {"label": "MOB",            "patterns": [r"months.?on.?book", r"loan.?age", r"^mob$"]},
-    "vintage":              {"label": "Vintage",        "patterns": [r"vintage", r"cohort", r"orig.?year"]},
     "co_borrower":          {"label": "Co-Borr",       "patterns": [r"co.?borrow", r"joint"]},
     "hardship":             {"label": "Hardship",       "patterns": [r"hardship", r"forbear"]},
     "modification":         {"label": "Mod",            "patterns": [r"modif", r"tdr"]},
@@ -63,6 +72,32 @@ STD_FIELDS = {
     "investor":             {"label": "Investor",       "patterns": [r"investor"]},
     "autopay":              {"label": "Autopay",        "patterns": [r"auto.?pay"]},
 }
+
+# Longitudinal fields — for time-series tapes with multiple rows per loan
+LONGITUDINAL_FIELDS = {
+    "reporting_date":           {"label": "Report Date",    "patterns": [r"report.?date", r"as.?of.?date", r"snapshot.?date", r"period.?date", r"cycle.?date"]},
+    "cumulative_principal_paid":{"label": "Cum Princ",      "patterns": [r"cum.?princ", r"cumul.?princ", r"accum.?princ"]},
+    "cumulative_interest_paid": {"label": "Cum Int",        "patterns": [r"cum.?int", r"cumul.?int", r"accum.?int"]},
+    "period_principal":         {"label": "Period Princ",   "patterns": [r"period.?princ", r"monthly.?princ", r"princ.?collect"]},
+    "period_interest":          {"label": "Period Int",     "patterns": [r"period.?int", r"monthly.?int", r"int.?collect"]},
+    "scheduled_payment":        {"label": "Sched Pmt",     "patterns": [r"sched.?p(ay|mt)", r"contract.?p(ay|mt)"]},
+    "beginning_balance":        {"label": "Beg Bal",       "patterns": [r"beg.?bal", r"beginning.?bal", r"bop.?bal", r"start.?bal"]},
+    "ending_balance":           {"label": "End Bal",       "patterns": [r"end.?bal", r"ending.?bal", r"eop.?bal", r"close.?bal"]},
+}
+
+# Combined: all standard fields (backward compatible)
+STD_FIELDS = {}
+STD_FIELDS.update(CANONICAL_FIELDS)
+STD_FIELDS.update(EXTENDED_FIELDS)
+STD_FIELDS.update(OPTIONAL_FIELDS)
+STD_FIELDS.update(LONGITUDINAL_FIELDS)
+
+# Field tier lookup
+FIELD_TIERS = {}
+for k in CANONICAL_FIELDS: FIELD_TIERS[k] = "canonical"
+for k in EXTENDED_FIELDS:  FIELD_TIERS[k] = "extended"
+for k in OPTIONAL_FIELDS:  FIELD_TIERS[k] = "optional"
+for k in LONGITUDINAL_FIELDS: FIELD_TIERS[k] = "longitudinal"
 
 
 # ═══════════════════════════════════════════════════════════════
@@ -170,6 +205,170 @@ def rule_match(df: pd.DataFrame, fields: Optional[dict] = None) -> dict:
                         field_best[fk] = (h, score)
 
     return {fk: col for fk, (col, _) in field_best.items()}
+
+
+# ═══════════════════════════════════════════════════════════════
+# TAPE TYPE DETECTION & LONGITUDINAL PROCESSING
+# ═══════════════════════════════════════════════════════════════
+
+def detect_tape_type(df: pd.DataFrame, mp: dict) -> dict:
+    """
+    Detect whether tape is static (one row per loan) or longitudinal (time-series).
+    Returns: {type: "static"|"longitudinal", unique_loans, total_rows, periods, date_range}
+    """
+    id_col = mp.get("loan_id")
+    if not id_col or id_col not in df.columns:
+        return {"type": "static", "unique_loans": len(df), "total_rows": len(df),
+                "periods": 1, "date_range": None}
+
+    unique = df[id_col].nunique()
+    total = len(df)
+    ratio = unique / total if total > 0 else 1.0
+
+    # Check for reporting date
+    date_col = mp.get("reporting_date")
+    date_range = None
+    periods = 1
+    if date_col and date_col in df.columns:
+        try:
+            dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
+            if len(dates) > 0:
+                date_range = {"min": str(dates.min().date()), "max": str(dates.max().date())}
+                periods = dates.nunique()
+        except:
+            pass
+
+    if ratio > 0.95:
+        tape_type = "static"
+    elif ratio < 0.5:
+        tape_type = "longitudinal"
+    else:
+        # Ambiguous — check if we have a reporting date column
+        tape_type = "longitudinal" if date_col else "static"
+
+    return {
+        "type": tape_type,
+        "unique_loans": int(unique),
+        "total_rows": total,
+        "periods": int(periods),
+        "date_range": date_range,
+    }
+
+
+def process_longitudinal(df: pd.DataFrame, mp: dict) -> tuple:
+    """
+    Process a longitudinal tape:
+    1. Sort by loan ID + date
+    2. Decompose cumulative fields into per-period deltas
+    3. Derive missing fields using amortization logic
+    4. Extract latest snapshot per loan for pool analysis
+
+    Returns: (latest_snapshot_df, full_timeseries_df, processing_log)
+    """
+    log = []
+    id_col = mp.get("loan_id")
+    date_col = mp.get("reporting_date")
+
+    if not id_col or id_col not in df.columns:
+        log.append("No loan_id mapped — cannot process longitudinal tape")
+        return df, df, log
+
+    # Step 1: Sort
+    sort_cols = [id_col]
+    if date_col and date_col in df.columns:
+        try:
+            df["_parsed_date"] = pd.to_datetime(df[date_col], errors='coerce')
+            sort_cols.append("_parsed_date")
+            log.append(f"Sorted by {id_col} + {date_col}")
+        except:
+            log.append(f"Could not parse date column {date_col}, using row order")
+    else:
+        log.append("No reporting_date mapped — assuming rows are in chronological order per loan")
+
+    df = df.sort_values(sort_cols).reset_index(drop=True)
+    grouped = df.groupby(id_col)
+
+    # Step 2: Decompose cumulative fields
+    cum_princ_col = mp.get("cumulative_principal_paid")
+    if cum_princ_col and cum_princ_col in df.columns:
+        vals = df[cum_princ_col].apply(parse_numeric)
+        df["_period_principal"] = grouped.apply(
+            lambda g: g[cum_princ_col].apply(parse_numeric).diff().fillna(g[cum_princ_col].apply(parse_numeric).iloc[0])
+        ).reset_index(level=0, drop=True)
+        log.append(f"Decomposed {cum_princ_col} → _period_principal")
+
+    cum_int_col = mp.get("cumulative_interest_paid")
+    if cum_int_col and cum_int_col in df.columns:
+        df["_period_interest"] = grouped.apply(
+            lambda g: g[cum_int_col].apply(parse_numeric).diff().fillna(g[cum_int_col].apply(parse_numeric).iloc[0])
+        ).reset_index(level=0, drop=True)
+        log.append(f"Decomposed {cum_int_col} → _period_interest")
+
+    # Use existing period fields if available (they take priority over derived)
+    per_princ_col = mp.get("period_principal")
+    if per_princ_col and per_princ_col in df.columns:
+        df["_period_principal"] = df[per_princ_col].apply(parse_numeric)
+        log.append(f"Using existing period principal: {per_princ_col}")
+
+    per_int_col = mp.get("period_interest")
+    if per_int_col and per_int_col in df.columns:
+        df["_period_interest"] = df[per_int_col].apply(parse_numeric)
+        log.append(f"Using existing period interest: {per_int_col}")
+
+    # Step 3: Derive missing fields (amortization logic)
+    bal_col = mp.get("current_balance") or mp.get("ending_balance")
+    pmt_col = mp.get("monthly_payment") or mp.get("scheduled_payment")
+
+    # Derive principal from balance change if not already computed
+    if bal_col and bal_col in df.columns and "_period_principal" not in df.columns:
+        bal_vals = df[bal_col].apply(parse_numeric)
+        df["_period_principal"] = -grouped.apply(
+            lambda g: g[bal_col].apply(parse_numeric).diff()
+        ).reset_index(level=0, drop=True)
+        # First row per loan has no prior — NaN
+        first_idx = grouped.head(1).index
+        df.loc[first_idx, "_period_principal"] = np.nan
+        log.append(f"Derived _period_principal from balance change ({bal_col})")
+
+    # Derive interest = payment - principal
+    if pmt_col and pmt_col in df.columns and "_period_principal" in df.columns and "_period_interest" not in df.columns:
+        df["_period_interest"] = df[pmt_col].apply(parse_numeric) - df["_period_principal"]
+        log.append(f"Derived _period_interest = {pmt_col} - _period_principal")
+
+    # Derive payment = principal + interest
+    if "_period_principal" in df.columns and "_period_interest" in df.columns:
+        if not pmt_col or pmt_col not in df.columns:
+            df["_derived_payment"] = df["_period_principal"] + df["_period_interest"]
+            log.append("Derived _derived_payment = _period_principal + _period_interest")
+
+    # Step 4: Extract latest snapshot per loan
+    latest = grouped.tail(1).copy()
+
+    # Compute loan-level aggregates from time-series
+    agg_dict = {}
+    if "_period_principal" in df.columns:
+        agg_dict["_period_principal"] = "sum"
+    if "_period_interest" in df.columns:
+        agg_dict["_period_interest"] = "sum"
+
+    if agg_dict:
+        loan_totals = grouped.agg(agg_dict)
+        loan_totals.columns = [f"_total{c}" for c in loan_totals.columns]
+        latest = latest.set_index(id_col).join(loan_totals).reset_index()
+
+    # Count periods per loan
+    period_counts = grouped.size().rename("_period_count")
+    latest = latest.set_index(id_col).join(period_counts).reset_index()
+
+    log.append(f"Extracted latest snapshot: {len(latest)} loans from {len(df)} rows")
+
+    # Clean up temp column
+    if "_parsed_date" in df.columns:
+        df = df.drop(columns=["_parsed_date"])
+    if "_parsed_date" in latest.columns:
+        latest = latest.drop(columns=["_parsed_date"])
+
+    return latest, df, log
 
 
 def score_template(template_mapping: dict, headers: list) -> float:
@@ -492,7 +691,7 @@ No explanation, no markdown, just the JSON object."""
                 "content-type": "application/json",
             },
             json={
-                "model": "claude-sonnet-4-20250514",
+                "model": "claude-3-5-sonnet-20241022",
                 "max_tokens": 2000,
                 "messages": [{"role": "user", "content": prompt}],
             },
