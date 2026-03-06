@@ -311,7 +311,8 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str, period_c
                          r"rate$", r"score$", r"balance$", r"vintage", r"cohort",
                          r"orig", r"amount$", r"term$", r"income", r"payment$",
                          r"month$", r"year$", r"quarter", r"vintage", r"number$",
-                         r"count$", r"ratio$", r"pct$", r"percent"]
+                         r"count$", r"ratio$", r"pct$", r"percent",
+                         r"^period"]  # skip any col already starting with period_/periods_
         if any(re.search(p, col, re.IGNORECASE) for p in skip_patterns):
             continue
 

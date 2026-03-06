@@ -1525,7 +1525,7 @@ elif page == "📋 Column Mapping":
         with uh4: st.markdown('<span style="color:#8494A7;font-size:10px"></span>', unsafe_allow_html=True)
 
         for col_name in unmapped_cols:
-            if st.session_state.df is not None:
+            if st.session_state.df is not None and col_name in st.session_state.df.columns:
                 samples = st.session_state.df[col_name].dropna().head(3).tolist()
                 sample_str = ", ".join(str(s)[:30] for s in samples)
             else:
