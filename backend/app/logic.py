@@ -255,6 +255,105 @@ def detect_tape_type(df: pd.DataFrame, mp: dict) -> dict:
     }
 
 
+def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str, period_col: str = None) -> tuple:
+    """
+    Auto-detect ANY cumulative columns in the DataFrame and derive period (delta) equivalents
+    for each loan group. Works across hundreds of loans correctly via groupby.
+
+    Rules:
+    - Detects columns with cumulative naming patterns (cum_, cumulative_, ytd_, _to_date, etc.)
+    - Skips derivation if an equivalent period column already exists
+    - Diffs within each loan group (never across loans)
+    - Clips negative diffs to 0 (handles data corrections)
+    - First period per loan = cumulative value itself
+
+    Returns: (enriched_df, derivation_log)
+    """
+    log = []
+
+    # Patterns that signal a column is cumulative
+    CUM_PATTERNS = [
+        (r'^cum[_\s](.+)',          r'\1'),           # cum_losses       → losses
+        (r'^cumulative[_\s](.+)',   r'\1'),           # cumulative_losses → losses
+        (r'^ytd[_\s](.+)',          r'\1'),           # ytd_payments     → payments
+        (r'^accum[_\s](.+)',        r'\1'),           # accum_interest   → interest
+        (r'^running[_\s](.+)',      r'\1'),           # running_total    → total
+        (r'(.+)_to_date$',         r'\1'),           # losses_to_date   → losses
+        (r'(.+)_cumulative$',      r'\1'),           # losses_cumulative → losses
+        (r'(.+)_cum$',             r'\1'),           # losses_cum       → losses
+        (r'(.+)_ytd$',             r'\1'),           # payments_ytd     → payments
+    ]
+
+    # Find all cumulative columns
+    cum_cols = []
+    for col in df.columns:
+        for pattern, _ in CUM_PATTERNS:
+            if re.search(pattern, col.strip(), re.IGNORECASE):
+                cum_cols.append(col)
+                break
+
+    if not cum_cols:
+        log.append("No cumulative columns detected")
+        return df, log
+
+    log.append(f"Detected {len(cum_cols)} cumulative column(s): {cum_cols}")
+
+    # Sort for correct chronological differencing
+    sort_cols = [id_col]
+    if period_col and period_col in df.columns:
+        sort_cols.append(period_col)
+    df = df.sort_values(sort_cols).reset_index(drop=True)
+
+    grouped = df.groupby(id_col)
+    n_loans = df[id_col].nunique()
+
+    for cum_col in cum_cols:
+        # Derive the base name by stripping cumulative prefix/suffix
+        base_name = cum_col.strip()
+        for pattern, replacement in CUM_PATTERNS:
+            cleaned = re.sub(pattern, replacement, base_name, flags=re.IGNORECASE).strip('_').strip()
+            if cleaned != base_name:
+                base_name = cleaned
+                break
+
+        period_col_name = f"period_{base_name.lower().replace(' ', '_')}"
+
+        # Check if an equivalent period column already exists
+        existing = [
+            c for c in df.columns
+            if c != cum_col and (
+                base_name.lower() in c.lower() or
+                c.lower().replace('period_', '') == base_name.lower()
+            )
+        ]
+        if existing:
+            log.append(f"Skipping '{cum_col}' — equivalent column already exists: {existing[0]}")
+            continue
+
+        # Check if column is actually numeric
+        num_vals = df[cum_col].apply(parse_numeric)
+        if num_vals.notna().sum() == 0:
+            log.append(f"Skipping '{cum_col}' — no numeric values found")
+            continue
+
+        # Derive period values by differencing within each loan group
+        df[period_col_name] = (
+            grouped[cum_col]
+            .transform(lambda x: x.apply(parse_numeric).diff().clip(lower=0))
+        )
+
+        # First period per loan: set to cumulative value (no prior period to diff against)
+        first_mask = ~df.duplicated(subset=[id_col], keep='first')
+        df.loc[first_mask, period_col_name] = df.loc[first_mask, cum_col].apply(parse_numeric)
+
+        log.append(
+            f"✅ Derived '{period_col_name}' from '{cum_col}' "
+            f"across {n_loans:,} loans ({len(df):,} rows)"
+        )
+
+    return df, log
+
+
 def process_longitudinal(df: pd.DataFrame, mp: dict) -> tuple:
     """
     Process a longitudinal tape:
@@ -288,7 +387,18 @@ def process_longitudinal(df: pd.DataFrame, mp: dict) -> tuple:
     df = df.sort_values(sort_cols).reset_index(drop=True)
     grouped = df.groupby(id_col)
 
-    # Step 2: Decompose cumulative fields
+    # Step 2a: Auto-detect and derive ALL cumulative columns generically
+    df, cum_log = detect_and_derive_cumulative_columns(
+        df,
+        id_col=id_col,
+        period_col=date_col if date_col and date_col in df.columns else None
+    )
+    log.extend(cum_log)
+
+    # Refresh groupby after potential new columns / reindex
+    grouped = df.groupby(id_col)
+
+    # Step 2b: Decompose explicitly mapped cumulative fields (principal + interest)
     cum_princ_col = mp.get("cumulative_principal_paid")
     if cum_princ_col and cum_princ_col in df.columns:
         vals = df[cum_princ_col].apply(parse_numeric)
@@ -688,9 +798,10 @@ No explanation, no markdown, just the JSON object."""
         text = None
 
         if openai_key:
-            # Use OpenAI
+            # Use OpenAI (PIMCO internal gateway — must include /chat/completions)
+            base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
             resp = httpx.post(
-                "https://api.openai.com/v1/chat/completions",
+                f"{base_url}/chat/completions",
                 headers={
                     "Authorization": f"Bearer {openai_key}",
                     "Content-Type": "application/json",
