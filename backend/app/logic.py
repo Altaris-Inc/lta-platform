@@ -308,7 +308,10 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str, period_c
         # Skip non-numeric or identifier-like columns
         skip_patterns = [r"id$", r"date", r"status", r"type", r"name",
                          r"code", r"flag", r"indicator", r"channel", r"purpose",
-                         r"rate$", r"score$", r"balance$", r"vintage", r"cohort"]
+                         r"rate$", r"score$", r"balance$", r"vintage", r"cohort",
+                         r"orig", r"amount$", r"term$", r"income", r"payment$",
+                         r"month$", r"year$", r"quarter", r"vintage", r"number$",
+                         r"count$", r"ratio$", r"pct$", r"percent"]
         if any(re.search(p, col, re.IGNORECASE) for p in skip_patterns):
             continue
 

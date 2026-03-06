@@ -1363,14 +1363,6 @@ elif page == "📋 Column Mapping":
                             new_mp[fk] = sel
                             changed = True
 
-    # ── Debug: show tape headers (temporary, remove after confirming derived cols work) ──
-    with st.expander("🔍 Debug: Tape Headers", expanded=False):
-        st.markdown(f"**hdrs ({len(hdrs)}):** {hdrs}")
-        st.markdown(f"**tape_headers ({len(tape_headers)}):** {tape_headers}")
-        st.markdown(f"**derived_cols found:** {derived_cols}")
-        period_in_hdrs = [h for h in all_headers if "period" in h.lower()]
-        st.markdown(f"**any 'period' in headers:** {period_in_hdrs}")
-
     # ── Derived Columns (auto-generated period_ fields from cumulative decomposition) ──
     if derived_cols:
         with st.expander(f"⚗️ Derived Period Columns ({len(derived_cols)})", expanded=True):
@@ -1381,11 +1373,102 @@ elif page == "📋 Column Mapping":
                 '</span>',
                 unsafe_allow_html=True
             )
+
+            # ── Preview table: fetch enriched data from export endpoint ──
+            id_col = mp.get("loan_id")
+            date_col = mp.get("reporting_date")
+
+            try:
+                import requests as _req, io as _io
+                _resp = _req.get(
+                    f"http://127.0.0.1:8000/api/tapes/{st.session_state.tape_id}/export",
+                    headers={"X-API-Key": st.session_state.api_key},
+                    timeout=30,
+                )
+                _resp.raise_for_status()
+                enriched_df = pd.read_csv(_io.StringIO(_resp.text))
+
+                # Build preview: loan_id + date + derived cols only
+                preview_cols = []
+                if id_col and id_col in enriched_df.columns:
+                    preview_cols.append(id_col)
+                if date_col and date_col in enriched_df.columns:
+                    preview_cols.append(date_col)
+                present_derived = [c for c in derived_cols if c in enriched_df.columns]
+                preview_cols += present_derived
+
+                if present_derived:
+                    preview_df = enriched_df[preview_cols].copy()
+
+                    # Sort by loan_id + date for readability
+                    sort_cols = [id_col] if id_col and id_col in preview_df.columns else []
+                    if date_col and date_col in preview_df.columns:
+                        sort_cols.append(date_col)
+                    if sort_cols:
+                        preview_df = preview_df.sort_values(sort_cols)
+
+                    # Show first 50 rows with clean formatting
+                    st.markdown(
+                        '<span style="color:#8494A7;font-size:11px">'
+                        f'Showing first 50 rows · {len(enriched_df):,} total rows · '
+                        f'{len(present_derived)} derived column(s)'
+                        '</span>',
+                        unsafe_allow_html=True
+                    )
+
+                    # Round numeric derived cols to 2dp for display
+                    display_df = preview_df.head(50).copy()
+                    for c in present_derived:
+                        if c in display_df.columns:
+                            display_df[c] = pd.to_numeric(display_df[c], errors='coerce').round(2)
+
+                    st.dataframe(
+                        display_df,
+                        use_container_width=True,
+                        height=300,
+                        column_config={
+                            c: st.column_config.NumberColumn(
+                                label=f"⚗️ {c}",
+                                format="%.2f",
+                            )
+                            for c in present_derived if c in display_df.columns
+                        }
+                    )
+
+                    # Summary stats per derived column
+                    st.markdown('<span style="color:#8494A7;font-size:11px;font-weight:600">Summary Stats</span>', unsafe_allow_html=True)
+                    stats_cols = st.columns(len(present_derived))
+                    for i, col_name in enumerate(present_derived):
+                        if col_name in enriched_df.columns:
+                            vals = pd.to_numeric(enriched_df[col_name], errors='coerce').dropna()
+                            with stats_cols[i]:
+                                st.markdown(
+                                    f'<div style="background:#171C24;border:1px solid #2A3545;'
+                                    f'border-radius:8px;padding:10px 14px;margin-bottom:8px;">'
+                                    f'<span style="color:#00D4AA;font-size:11px;font-weight:600">⚗️ {col_name}</span><br>'
+                                    f'<span style="color:#8494A7;font-size:10px">Sum: </span>'
+                                    f'<span style="color:#E8ECF1;font-size:10px">{vals.sum():,.2f}</span><br>'
+                                    f'<span style="color:#8494A7;font-size:10px">Mean: </span>'
+                                    f'<span style="color:#E8ECF1;font-size:10px">{vals.mean():,.2f}</span><br>'
+                                    f'<span style="color:#8494A7;font-size:10px">Min: </span>'
+                                    f'<span style="color:#E8ECF1;font-size:10px">{vals.min():,.2f}</span><br>'
+                                    f'<span style="color:#8494A7;font-size:10px">Max: </span>'
+                                    f'<span style="color:#E8ECF1;font-size:10px">{vals.max():,.2f}</span>'
+                                    f'</div>',
+                                    unsafe_allow_html=True
+                                )
+                else:
+                    st.info("Derived columns not yet in exported data — re-upload the tape to generate them.")
+
+            except Exception as e:
+                st.warning(f"Could not load preview: {e}")
+
+            st.markdown("---")
+
+            # ── Per-column mapping dropdowns ──
             col_d1, col_d2 = st.columns(2)
             for i, col_name in enumerate(sorted(derived_cols)):
-                # Infer the source cumulative column name for display
                 base = col_name.replace("period_", "", 1)
-                # Find likely source cumulative column
                 src_candidates = [
                     h for h in hdrs
                     if base in h.lower() and any(
@@ -1404,7 +1487,6 @@ elif page == "📋 Column Mapping":
                         f'</div>',
                         unsafe_allow_html=True
                     )
-                    # Allow user to map this derived col to a standard field
                     unmapped_std = [k for k in all_flds if k not in new_mp]
                     map_options = ["— (keep as-is) —"] + unmapped_std
                     map_sel = st.selectbox(
