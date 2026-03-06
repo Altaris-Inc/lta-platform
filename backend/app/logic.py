@@ -16,9 +16,9 @@ from typing import Optional
 
 # Tier 1: Canonical — always expected, core to every tape
 CANONICAL_FIELDS = {
-    "loan_id":              {"label": "Loan ID",       "patterns": [r"loan.?id", r"account.?(id|num|no)", r"^id$"]},
+    "loan_id":              {"label": "Loan ID",       "patterns": [r"loan.?id", r"account.?(id|num|no)", r"^id$", r"auction.?id"]},
     "current_balance":      {"label": "Curr Bal",      "patterns": [r"curr.?bal", r"current.?(bal|amount)", r"^upb$", r"outstanding"]},
-    "original_balance":     {"label": "Orig Bal",      "patterns": [r"orig.?(bal|amount|principal)", r"loan.?amount", r"funded"]},
+    "original_balance":     {"label": "Orig Bal",      "patterns": [r"orig.?(bal|amount|principal)", r"loan.?amount", r"funded", r"origination.?amount"]},
     "interest_rate":        {"label": "Rate",           "patterns": [r"interest.?rate", r"^rate$", r"coupon", r"^apr$"]},
     "fico_origination":     {"label": "FICO Orig",     "patterns": [r"fico.?orig", r"orig.?fico", r"orig.?score"]},
     "loan_status":          {"label": "Status",         "patterns": [r"loan.?status", r"^status$"]},
@@ -75,11 +75,11 @@ OPTIONAL_FIELDS = {
 
 # Longitudinal fields — for time-series tapes with multiple rows per loan
 LONGITUDINAL_FIELDS = {
-    "reporting_date":           {"label": "Report Date",    "patterns": [r"report.?date", r"as.?of.?date", r"snapshot.?date", r"period.?date", r"cycle.?date"]},
-    "cumulative_principal_paid":{"label": "Cum Princ",      "patterns": [r"cum.?princ", r"cumul.?princ", r"accum.?princ"]},
-    "cumulative_interest_paid": {"label": "Cum Int",        "patterns": [r"cum.?int", r"cumul.?int", r"accum.?int"]},
-    "period_principal":         {"label": "Period Princ",   "patterns": [r"period.?princ", r"monthly.?princ", r"princ.?collect"]},
-    "period_interest":          {"label": "Period Int",     "patterns": [r"period.?int", r"monthly.?int", r"int.?collect"]},
+    "reporting_date":           {"label": "Report Date",    "patterns": [r"report.?date", r"as.?of.?date", r"asofdate", r"snapshot.?date", r"period.?date", r"cycle.?date", r"^asof"]},
+    "cumulative_principal_paid":{"label": "Cum Princ",      "patterns": [r"cum.?princ", r"cumul.?princ", r"accum.?princ", r"princ.?repay", r"principal.?repay"]},
+    "cumulative_interest_paid": {"label": "Cum Int",        "patterns": [r"cum.?int", r"cumul.?int", r"accum.?int", r"int.?repay", r"interest.?repay"]},
+    "period_principal":         {"label": "Period Princ",   "patterns": [r"period.?princ", r"monthly.?princ", r"princ.?collect", r"princ.?distrib"]},
+    "period_interest":          {"label": "Period Int",     "patterns": [r"period.?int", r"monthly.?int", r"int.?collect", r"int.?distrib"]},
     "scheduled_payment":        {"label": "Sched Pmt",     "patterns": [r"sched.?p(ay|mt)", r"contract.?p(ay|mt)"]},
     "beginning_balance":        {"label": "Beg Bal",       "patterns": [r"beg.?bal", r"beginning.?bal", r"bop.?bal", r"start.?bal"]},
     "ending_balance":           {"label": "End Bal",       "patterns": [r"end.?bal", r"ending.?bal", r"eop.?bal", r"close.?bal"]},
