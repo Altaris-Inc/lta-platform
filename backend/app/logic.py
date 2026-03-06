@@ -284,13 +284,53 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str, period_c
         (r'(.+)_ytd$',             r'\1'),           # payments_ytd     → payments
     ]
 
-    # Find all cumulative columns
+    # Find cumulative columns — two methods:
+    # 1. Name pattern matching (cum_, ytd_, _to_date, etc.)
+    # 2. Value-based: numeric columns monotonically increasing per loan (≥70% of loans)
     cum_cols = []
+    already_period = set(c for c in df.columns if c.startswith("period_"))
+
     for col in df.columns:
+        if col in already_period:
+            continue
+
+        # Method 1: name pattern
+        name_match = False
         for pattern, _ in CUM_PATTERNS:
             if re.search(pattern, col.strip(), re.IGNORECASE):
-                cum_cols.append(col)
+                name_match = True
                 break
+        if name_match:
+            cum_cols.append(col)
+            continue
+
+        # Method 2: value-based monotonic check
+        # Skip non-numeric or identifier-like columns
+        skip_patterns = [r"id$", r"date", r"status", r"type", r"name",
+                         r"code", r"flag", r"indicator", r"channel", r"purpose",
+                         r"rate$", r"score$", r"balance$", r"vintage", r"cohort"]
+        if any(re.search(p, col, re.IGNORECASE) for p in skip_patterns):
+            continue
+
+        num_vals = df[col].apply(parse_numeric)
+        if num_vals.notna().sum() < 10:
+            continue
+
+        # Check if values are monotonically non-decreasing within each loan group
+        try:
+            def _mono_ratio(g):
+                v = g.apply(parse_numeric).dropna()
+                if len(v) < 2:
+                    return 0.0
+                diffs = v.diff().dropna()
+                return float((diffs >= 0).sum()) / len(diffs)
+
+            mono_ratios = df.groupby(id_col)[col].apply(_mono_ratio)
+            # ≥85% of periods non-decreasing in ≥70% of loans → cumulative
+            if (mono_ratios >= 0.85).mean() >= 0.70:
+                cum_cols.append(col)
+        except Exception:
+            continue
 
     if not cum_cols:
         log.append("No cumulative columns detected")
