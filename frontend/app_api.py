@@ -1274,11 +1274,14 @@ elif page == "📋 Column Mapping":
         if k not in ref_fields:
             extra_mapped[k] = all_flds.get(k, k)
 
-    # Detect derived columns: period_* columns in hdrs that were auto-generated
-    # from cumulative fields and aren't in STD_FIELDS
+    # Detect derived columns: period_* columns in hdrs auto-generated from cumulative fields
+    # Also check tape headers which may include derived cols added during processing
+    tape_headers = tape.get("headers", []) if tape else []
+    all_headers = list(set(hdrs + tape_headers))
+
     derived_cols = [
-        h for h in hdrs
-        if h.startswith("period_") and h not in all_flds.values() and h not in mp.values()
+        h for h in all_headers
+        if h.startswith("period_")
     ]
 
     options = ["— (unmapped)"] + sorted(hdrs)
@@ -1359,6 +1362,14 @@ elif page == "📋 Column Mapping":
                         if sel != current:
                             new_mp[fk] = sel
                             changed = True
+
+    # ── Debug: show tape headers (temporary, remove after confirming derived cols work) ──
+    with st.expander("🔍 Debug: Tape Headers", expanded=False):
+        st.markdown(f"**hdrs ({len(hdrs)}):** {hdrs}")
+        st.markdown(f"**tape_headers ({len(tape_headers)}):** {tape_headers}")
+        st.markdown(f"**derived_cols found:** {derived_cols}")
+        period_in_hdrs = [h for h in all_headers if "period" in h.lower()]
+        st.markdown(f"**any 'period' in headers:** {period_in_hdrs}")
 
     # ── Derived Columns (auto-generated period_ fields from cumulative decomposition) ──
     if derived_cols:
