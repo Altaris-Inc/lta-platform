@@ -293,7 +293,7 @@ async def auto_match(
             merged.update(ai_mapping)
             tape.mapping = merged
         else:
-            raise HTTPException(400, "AI matching failed. Check ANTHROPIC_API_KEY env var.")
+            raise HTTPException(400, "AI matching failed. Set OPENAI_API_KEY or ANTHROPIC_API_KEY env var.")
     else:
         tape.mapping = rule_match(df, fields)
 

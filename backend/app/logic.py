@@ -636,20 +636,22 @@ def calc_multi_regression(x1: np.ndarray, x2: np.ndarray, y: np.ndarray) -> Opti
 
 
 # ═══════════════════════════════════════════════════════════════
-# AI AUTO-MATCH (Anthropic Claude API)
+# AI AUTO-MATCH (OpenAI or Anthropic)
 # ═══════════════════════════════════════════════════════════════
 
 def ai_match(df: pd.DataFrame, fields: Optional[dict] = None, api_key: Optional[str] = None) -> Optional[dict]:
     """
-    Use Claude to match CSV columns to standard ABS fields.
+    Use AI (OpenAI GPT or Anthropic Claude) to match CSV columns to standard ABS fields.
+    Checks OPENAI_API_KEY first, then ANTHROPIC_API_KEY.
     Returns dict: {field_key: column_name} or None on failure.
-    Requires ANTHROPIC_API_KEY env var or api_key parameter.
     """
     import os
     import json as _json
 
-    key = api_key or os.getenv("ANTHROPIC_API_KEY")
-    if not key:
+    openai_key = os.getenv("OPENAI_API_KEY")
+    anthropic_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+
+    if not openai_key and not anthropic_key:
         return None
 
     flds = fields or STD_FIELDS
@@ -683,23 +685,51 @@ No explanation, no markdown, just the JSON object."""
 
     try:
         import httpx
-        resp = httpx.post(
-            "https://api.anthropic.com/v1/messages",
-            headers={
-                "x-api-key": key,
-                "anthropic-version": "2023-06-01",
-                "content-type": "application/json",
-            },
-            json={
-                "model": "claude-3-5-sonnet-20241022",
-                "max_tokens": 2000,
-                "messages": [{"role": "user", "content": prompt}],
-            },
-            timeout=30,
-        )
-        resp.raise_for_status()
-        data = resp.json()
-        text = data["content"][0]["text"].strip()
+        text = None
+
+        if openai_key:
+            # Use OpenAI
+            resp = httpx.post(
+                "https://api.openai.com/v1/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openai_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o",
+                    "max_tokens": 2000,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=30,
+                verify=False,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"].strip()
+
+        elif anthropic_key:
+            # Use Anthropic
+            resp = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": anthropic_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-3-5-sonnet-20241022",
+                    "max_tokens": 2000,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=30,
+                verify=False,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["content"][0]["text"].strip()
+
+        if not text:
+            return None
 
         # Strip markdown fences if present
         text = re.sub(r'^```json\s*', '', text)
@@ -717,5 +747,8 @@ No explanation, no markdown, just the JSON object."""
 
         return clean if clean else None
 
-    except Exception:
+    except Exception as e:
+        print(f"AI MATCH ERROR: {e}")
+        import traceback
+        traceback.print_exc()
         return None
