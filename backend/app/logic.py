@@ -268,15 +268,10 @@ def _ai_detect_cumulative(df: pd.DataFrame, id_col: str, date_col: str,
 
     openai_key = openai_key or os.getenv("OPENAI_API_KEY")
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
-    base_url = os.getenv("OPENAI_BASE_URL", "").rstrip("/")
-
-    # Require base_url for OpenAI to avoid hitting public endpoint accidentally
-    if openai_key and not base_url:
-        print("AI cumulative detection: OPENAI_BASE_URL not set — skipping OpenAI, trying Anthropic")
-        openai_key = None
+    base_url = os.getenv("OPENAI_BASE_URL", "https://openai-gateway-beta.apps.ai-dev.pimco.cloud/v1").rstrip("/")
 
     if not openai_key and not anthropic_key:
-        print("AI cumulative detection: no usable API key/endpoint — skipping")
+        print("AI cumulative detection: no API key found — skipping")
         return []
 
     if not candidate_cols:
@@ -396,19 +391,19 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
 
     # ── Step 1: Sort by loan_id + date FIRST (critical for correct diff) ──
     sort_cols = [id_col]
+    has_date_sort = False
     if period_col and period_col in df.columns:
         try:
             df["_sort_date"] = pd.to_datetime(df[period_col], errors="coerce")
             sort_cols.append("_sort_date")
+            has_date_sort = True
             log.append(f"Sorted by {id_col} + {period_col} (chronological)")
         except Exception:
             log.append(f"Could not parse {period_col} as date — sorting by {id_col} only")
     else:
         log.append(f"No date column provided — sorting by {id_col} only")
 
-    df = df.sort_values(sort_cols).reset_index(drop=True)
-    if "_sort_date" in df.columns:
-        df = df.drop(columns=["_sort_date"])
+    df = df.sort_values(sort_cols, kind="mergesort").reset_index(drop=True)
 
     already_period = set(c for c in df.columns if re.match(r'^period', c, re.IGNORECASE))
     cum_cols = []
@@ -486,7 +481,9 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
     log.append(f"Total cumulative columns to derive: {cum_cols}")
 
     # ── Step 5: Derive period columns by differencing within each loan group ──
-    grouped = df.groupby(id_col)
+    # Use sort_col inside transform to guarantee chronological order per loan
+    sort_key = "_sort_date" if has_date_sort else None
+    grouped = df.groupby(id_col, sort=False)
     n_loans = df[id_col].nunique()
 
     for cum_col in cum_cols:
@@ -518,22 +515,37 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
             log.append(f"Skipping '{cum_col}' — no numeric values")
             continue
 
-        # Diff within each loan group (already sorted by date above)
-        df[period_col_name] = (
-            grouped[cum_col]
-            .transform(lambda x: x.apply(parse_numeric).diff().clip(lower=0))
-        )
+        # Diff within each loan group, explicitly sorted by date
+        if sort_key and sort_key in df.columns:
+            df[period_col_name] = (
+                df.sort_values([id_col, sort_key])
+                .groupby(id_col)[cum_col]
+                .transform(lambda x: x.apply(parse_numeric).diff().clip(lower=0))
+            )
+        else:
+            df[period_col_name] = (
+                grouped[cum_col]
+                .transform(lambda x: x.apply(parse_numeric).diff().clip(lower=0))
+            )
 
         # First period per loan = cumulative value itself (no prior to diff against)
-        first_mask = ~df.duplicated(subset=[id_col], keep='first')
-        df.loc[first_mask, period_col_name] = (
-            df.loc[first_mask, cum_col].apply(parse_numeric)
+        # Use date-sorted first row per loan
+        if sort_key and sort_key in df.columns:
+            first_idx = df.sort_values([id_col, sort_key]).groupby(id_col).head(1).index
+        else:
+            first_idx = df.groupby(id_col).head(1).index
+        df.loc[first_idx, period_col_name] = (
+            df.loc[first_idx, cum_col].apply(parse_numeric)
         )
 
         log.append(
             f"✅ Derived '{period_col_name}' from '{cum_col}' "
             f"across {n_loans:,} loans ({len(df):,} rows)"
         )
+
+    # Clean up temp sort column
+    if "_sort_date" in df.columns:
+        df = df.drop(columns=["_sort_date"])
 
     return df, log
 
