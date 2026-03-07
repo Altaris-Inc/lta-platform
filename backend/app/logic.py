@@ -268,8 +268,15 @@ def _ai_detect_cumulative(df: pd.DataFrame, id_col: str, date_col: str,
 
     openai_key = openai_key or os.getenv("OPENAI_API_KEY")
     anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    base_url = os.getenv("OPENAI_BASE_URL", "").rstrip("/")
+
+    # Require base_url for OpenAI to avoid hitting public endpoint accidentally
+    if openai_key and not base_url:
+        print("AI cumulative detection: OPENAI_BASE_URL not set — skipping OpenAI, trying Anthropic")
+        openai_key = None
 
     if not openai_key and not anthropic_key:
+        print("AI cumulative detection: no usable API key/endpoint — skipping")
         return []
 
     if not candidate_cols:
@@ -321,7 +328,6 @@ Respond ONLY with a JSON object like:
 No explanation, no markdown, just the JSON."""
 
     try:
-        base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
         if openai_key:
             resp = httpx.post(
                 f"{base_url}/chat/completions",
