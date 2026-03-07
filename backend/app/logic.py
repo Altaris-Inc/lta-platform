@@ -255,72 +255,211 @@ def detect_tape_type(df: pd.DataFrame, mp: dict) -> dict:
     }
 
 
-def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str, period_col: str = None) -> tuple:
+def _ai_detect_cumulative(df: pd.DataFrame, id_col: str, date_col: str,
+                           candidate_cols: list, openai_key: str = None) -> list:
     """
-    Auto-detect ANY cumulative columns in the DataFrame and derive period (delta) equivalents
-    for each loan group. Works across hundreds of loans correctly via groupby.
+    Use AI to determine which candidate columns contain cumulative values
+    by sampling 5-10 loan IDs and sending the data to the model.
 
-    Rules:
-    - Detects columns with cumulative naming patterns (cum_, cumulative_, ytd_, _to_date, etc.)
-    - Skips derivation if an equivalent period column already exists
-    - Diffs within each loan group (never across loans)
-    - Clips negative diffs to 0 (handles data corrections)
-    - First period per loan = cumulative value itself
+    Returns list of column names confirmed as cumulative.
+    """
+    import os, json as _json
+    import httpx
+
+    openai_key = openai_key or os.getenv("OPENAI_API_KEY")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+
+    if not openai_key and not anthropic_key:
+        return []
+
+    if not candidate_cols:
+        return []
+
+    # Sample 5-10 loan IDs that have at least 3 periods each
+    loan_counts = df.groupby(id_col).size()
+    eligible_loans = loan_counts[loan_counts >= 3].index.tolist()
+    sample_loans = eligible_loans[:8] if len(eligible_loans) >= 8 else eligible_loans
+    if not sample_loans:
+        return []
+
+    sample_df = df[df[id_col].isin(sample_loans)].copy()
+    if date_col and date_col in sample_df.columns:
+        try:
+            sample_df["_sort_date"] = pd.to_datetime(sample_df[date_col], errors="coerce")
+            sample_df = sample_df.sort_values([id_col, "_sort_date"]).drop(columns=["_sort_date"])
+        except Exception:
+            sample_df = sample_df.sort_values([id_col])
+    else:
+        sample_df = sample_df.sort_values([id_col])
+
+    # Build sample table string showing id + date + candidate cols
+    display_cols = [id_col]
+    if date_col and date_col in sample_df.columns:
+        display_cols.append(date_col)
+    display_cols += candidate_cols
+
+    sample_str = sample_df[display_cols].head(40).to_string(index=False)
+
+    prompt = f"""You are an ABS loan tape data analyst. I have a longitudinal loan tape (multiple rows per loan ID over time).
+
+I need to determine which of these columns contain CUMULATIVE values (running totals that increase over time per loan) vs PERIODIC values (the amount for that specific period only).
+
+Columns to analyze: {candidate_cols}
+
+Here is a sample of the data showing multiple periods for several loan IDs:
+
+{sample_str}
+
+For each column, determine if the values are:
+- CUMULATIVE: values generally increase over time for each loan (running total)
+- PERIODIC: values vary up and down each period (not a running total)
+
+Focus especially on: principal_repayments, interest_paid, default_amount, recoveries, and similar financial flow columns.
+
+Respond ONLY with a JSON object like:
+{{"cumulative": ["col1", "col2"], "periodic": ["col3", "col4"]}}
+No explanation, no markdown, just the JSON."""
+
+    try:
+        base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+        if openai_key:
+            resp = httpx.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {openai_key}",
+                         "Content-Type": "application/json"},
+                json={"model": "gpt-4o-mini", "max_tokens": 500,
+                      "messages": [{"role": "user", "content": prompt}]},
+                timeout=30, verify=False,
+            )
+            resp.raise_for_status()
+            text = resp.json()["choices"][0]["message"]["content"].strip()
+        else:
+            resp = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": anthropic_key,
+                         "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json={"model": "claude-3-5-sonnet-20241022", "max_tokens": 500,
+                      "messages": [{"role": "user", "content": prompt}]},
+                timeout=30, verify=False,
+            )
+            resp.raise_for_status()
+            text = resp.json()["content"][0]["text"].strip()
+
+        text = re.sub(r'^```json\s*|\s*```$', '', text).strip()
+        result = _json.loads(text)
+        confirmed = [c for c in result.get("cumulative", []) if c in candidate_cols]
+        print(f"AI cumulative detection: cumulative={confirmed}, "
+              f"periodic={result.get('periodic', [])}")
+        return confirmed
+
+    except Exception as e:
+        print(f"AI cumulative detection failed: {e}")
+        return []
+
+
+def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
+                                          period_col: str = None) -> tuple:
+    """
+    Auto-detect cumulative columns and derive period (delta) equivalents per loan.
+
+    Detection methods (in order):
+    1. Name patterns (cum_, ytd_, _to_date, etc.)
+    2. AI analysis — samples 5-10 loans, asks model to confirm cumulative vs periodic
+       specifically for financial flow columns (principal, interest, defaults, recoveries)
+    3. Monotonic heuristic fallback for any remaining numeric columns
+
+    Always sorts by loan_id + date before differencing to ensure correct order.
 
     Returns: (enriched_df, derivation_log)
     """
+    import os
     log = []
 
-    # Patterns that signal a column is cumulative
     CUM_PATTERNS = [
-        (r'^cum[_\s](.+)',          r'\1'),           # cum_losses       → losses
-        (r'^cumulative[_\s](.+)',   r'\1'),           # cumulative_losses → losses
-        (r'^ytd[_\s](.+)',          r'\1'),           # ytd_payments     → payments
-        (r'^accum[_\s](.+)',        r'\1'),           # accum_interest   → interest
-        (r'^running[_\s](.+)',      r'\1'),           # running_total    → total
-        (r'(.+)_to_date$',         r'\1'),           # losses_to_date   → losses
-        (r'(.+)_cumulative$',      r'\1'),           # losses_cumulative → losses
-        (r'(.+)_cum$',             r'\1'),           # losses_cum       → losses
-        (r'(.+)_ytd$',             r'\1'),           # payments_ytd     → payments
+        (r'^cum[_\s](.+)',         r'\1'),
+        (r'^cumulative[_\s](.+)', r'\1'),
+        (r'^ytd[_\s](.+)',         r'\1'),
+        (r'^accum[_\s](.+)',       r'\1'),
+        (r'^running[_\s](.+)',     r'\1'),
+        (r'(.+)_to_date$',        r'\1'),
+        (r'(.+)_cumulative$',     r'\1'),
+        (r'(.+)_cum$',            r'\1'),
+        (r'(.+)_ytd$',            r'\1'),
     ]
 
-    # Find cumulative columns — two methods:
-    # 1. Name pattern matching (cum_, ytd_, _to_date, etc.)
-    # 2. Value-based: numeric columns monotonically increasing per loan (≥70% of loans)
-    cum_cols = []
-    already_period = set(c for c in df.columns if c.startswith("period_"))
+    # ── Step 1: Sort by loan_id + date FIRST (critical for correct diff) ──
+    sort_cols = [id_col]
+    if period_col and period_col in df.columns:
+        try:
+            df["_sort_date"] = pd.to_datetime(df[period_col], errors="coerce")
+            sort_cols.append("_sort_date")
+            log.append(f"Sorted by {id_col} + {period_col} (chronological)")
+        except Exception:
+            log.append(f"Could not parse {period_col} as date — sorting by {id_col} only")
+    else:
+        log.append(f"No date column provided — sorting by {id_col} only")
 
+    df = df.sort_values(sort_cols).reset_index(drop=True)
+    if "_sort_date" in df.columns:
+        df = df.drop(columns=["_sort_date"])
+
+    already_period = set(c for c in df.columns if re.match(r'^period', c, re.IGNORECASE))
+    cum_cols = []
+
+    # ── Step 2: Name pattern matching ──
     for col in df.columns:
         if col in already_period:
             continue
-
-        # Method 1: name pattern
-        name_match = False
         for pattern, _ in CUM_PATTERNS:
             if re.search(pattern, col.strip(), re.IGNORECASE):
-                name_match = True
+                cum_cols.append(col)
                 break
-        if name_match:
-            cum_cols.append(col)
-            continue
 
-        # Method 2: value-based monotonic check
-        # Skip non-numeric or identifier-like columns
-        skip_patterns = [r"id$", r"date", r"status", r"type", r"name",
-                         r"code", r"flag", r"indicator", r"channel", r"purpose",
-                         r"rate$", r"score$", r"balance$", r"vintage", r"cohort",
-                         r"orig", r"amount$", r"term$", r"income", r"payment$",
-                         r"month$", r"year$", r"quarter", r"vintage", r"number$",
-                         r"count$", r"ratio$", r"pct$", r"percent",
-                         r"^period"]  # skip any col already starting with period_/periods_
+    # ── Step 3: AI detection for financial flow columns ──
+    # Target columns commonly cumulative in ABS tapes but without obvious naming
+    ai_target_patterns = [
+        r"principal", r"interest", r"default", r"recovery", r"recoveri",
+        r"loss", r"prepay", r"charge.?off", r"write.?off", r"collection",
+        r"payment", r"repay", r"paid", r"received",
+    ]
+    ai_candidates = [
+        col for col in df.columns
+        if col not in already_period
+        and col not in cum_cols
+        and any(re.search(p, col, re.IGNORECASE) for p in ai_target_patterns)
+        and df[col].apply(parse_numeric).notna().sum() >= 10
+    ]
+
+    if ai_candidates:
+        log.append(f"Sending {len(ai_candidates)} candidate column(s) to AI for cumulative detection: {ai_candidates}")
+        ai_confirmed = _ai_detect_cumulative(
+            df, id_col=id_col, date_col=period_col,
+            candidate_cols=ai_candidates,
+            openai_key=os.getenv("OPENAI_API_KEY")
+        )
+        if ai_confirmed:
+            cum_cols.extend(ai_confirmed)
+            log.append(f"AI confirmed cumulative: {ai_confirmed}")
+        else:
+            log.append("AI detection returned no additional cumulative columns")
+
+    # ── Step 4: Monotonic heuristic for any remaining numeric columns ──
+    skip_patterns = [
+        r"id$", r"date", r"status", r"type", r"name", r"code", r"flag",
+        r"indicator", r"channel", r"purpose", r"rate$", r"score$", r"balance$",
+        r"vintage", r"cohort", r"orig", r"amount$", r"term$", r"income",
+        r"month$", r"year$", r"quarter", r"number$", r"count$", r"ratio$",
+        r"pct$", r"percent", r"^period",
+    ]
+    for col in df.columns:
+        if col in already_period or col in cum_cols:
+            continue
         if any(re.search(p, col, re.IGNORECASE) for p in skip_patterns):
             continue
-
         num_vals = df[col].apply(parse_numeric)
         if num_vals.notna().sum() < 10:
             continue
-
-        # Check if values are monotonically non-decreasing within each loan group
         try:
             def _mono_ratio(g):
                 v = g.apply(parse_numeric).dropna()
@@ -328,9 +467,7 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str, period_c
                     return 0.0
                 diffs = v.diff().dropna()
                 return float((diffs >= 0).sum()) / len(diffs)
-
             mono_ratios = df.groupby(id_col)[col].apply(_mono_ratio)
-            # ≥85% of periods non-decreasing in ≥70% of loans → cumulative
             if (mono_ratios >= 0.85).mean() >= 0.70:
                 cum_cols.append(col)
         except Exception:
@@ -340,29 +477,25 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str, period_c
         log.append("No cumulative columns detected")
         return df, log
 
-    log.append(f"Detected {len(cum_cols)} cumulative column(s): {cum_cols}")
+    log.append(f"Total cumulative columns to derive: {cum_cols}")
 
-    # Sort for correct chronological differencing
-    sort_cols = [id_col]
-    if period_col and period_col in df.columns:
-        sort_cols.append(period_col)
-    df = df.sort_values(sort_cols).reset_index(drop=True)
-
+    # ── Step 5: Derive period columns by differencing within each loan group ──
     grouped = df.groupby(id_col)
     n_loans = df[id_col].nunique()
 
     for cum_col in cum_cols:
-        # Derive the base name by stripping cumulative prefix/suffix
+        # Strip cumulative prefix/suffix to get base name
         base_name = cum_col.strip()
         for pattern, replacement in CUM_PATTERNS:
-            cleaned = re.sub(pattern, replacement, base_name, flags=re.IGNORECASE).strip('_').strip()
+            cleaned = re.sub(pattern, replacement, base_name,
+                             flags=re.IGNORECASE).strip('_').strip()
             if cleaned != base_name:
                 base_name = cleaned
                 break
 
         period_col_name = f"period_{base_name.lower().replace(' ', '_')}"
 
-        # Check if an equivalent period column already exists
+        # Skip if equivalent already exists
         existing = [
             c for c in df.columns
             if c != cum_col and (
@@ -371,24 +504,25 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str, period_c
             )
         ]
         if existing:
-            log.append(f"Skipping '{cum_col}' — equivalent column already exists: {existing[0]}")
+            log.append(f"Skipping '{cum_col}' — '{existing[0]}' already exists")
             continue
 
-        # Check if column is actually numeric
         num_vals = df[cum_col].apply(parse_numeric)
         if num_vals.notna().sum() == 0:
-            log.append(f"Skipping '{cum_col}' — no numeric values found")
+            log.append(f"Skipping '{cum_col}' — no numeric values")
             continue
 
-        # Derive period values by differencing within each loan group
+        # Diff within each loan group (already sorted by date above)
         df[period_col_name] = (
             grouped[cum_col]
             .transform(lambda x: x.apply(parse_numeric).diff().clip(lower=0))
         )
 
-        # First period per loan: set to cumulative value (no prior period to diff against)
+        # First period per loan = cumulative value itself (no prior to diff against)
         first_mask = ~df.duplicated(subset=[id_col], keep='first')
-        df.loc[first_mask, period_col_name] = df.loc[first_mask, cum_col].apply(parse_numeric)
+        df.loc[first_mask, period_col_name] = (
+            df.loc[first_mask, cum_col].apply(parse_numeric)
+        )
 
         log.append(
             f"✅ Derived '{period_col_name}' from '{cum_col}' "
