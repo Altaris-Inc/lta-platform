@@ -394,10 +394,16 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
     has_date_sort = False
     if period_col and period_col in df.columns:
         try:
-            df["_sort_date"] = pd.to_datetime(df[period_col], errors="coerce")
-            sort_cols.append("_sort_date")
-            has_date_sort = True
-            log.append(f"Sorted by {id_col} + {period_col} (chronological)")
+            # If already datetime (e.g. _parsed_date), use directly
+            if pd.api.types.is_datetime64_any_dtype(df[period_col]):
+                sort_cols.append(period_col)
+                has_date_sort = True
+                log.append(f"Sorted by {id_col} + {period_col} (already datetime)")
+            else:
+                df["_sort_date"] = pd.to_datetime(df[period_col], errors="coerce")
+                sort_cols.append("_sort_date")
+                has_date_sort = True
+                log.append(f"Sorted by {id_col} + {period_col} (chronological)")
         except Exception:
             log.append(f"Could not parse {period_col} as date — sorting by {id_col} only")
     else:
@@ -482,7 +488,13 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
 
     # ── Step 5: Derive period columns by differencing within each loan group ──
     # Use sort_col inside transform to guarantee chronological order per loan
-    sort_key = "_sort_date" if has_date_sort else None
+    # Determine the actual sort key column available in df
+    if "_sort_date" in df.columns:
+        sort_key = "_sort_date"
+    elif has_date_sort and period_col and period_col in df.columns:
+        sort_key = period_col  # already datetime (_parsed_date)
+    else:
+        sort_key = None
     grouped = df.groupby(id_col, sort=False)
     n_loans = df[id_col].nunique()
 
@@ -575,10 +587,14 @@ def process_longitudinal(df: pd.DataFrame, mp: dict) -> tuple:
     grouped = df.groupby(id_col)
 
     # Step 2a: Auto-detect and derive ALL cumulative columns generically
+    # Use _parsed_date if available (already datetime) so sorting inside detect is correct
+    effective_date_col = "_parsed_date" if "_parsed_date" in df.columns else (
+        date_col if date_col and date_col in df.columns else None
+    )
     df, cum_log = detect_and_derive_cumulative_columns(
         df,
         id_col=id_col,
-        period_col=date_col if date_col and date_col in df.columns else None
+        period_col=effective_date_col
     )
     log.extend(cum_log)
 

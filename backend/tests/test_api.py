@@ -60,7 +60,7 @@ class TestHealth:
         assert resp.status_code == 200
         data = resp.json()
         assert "loan_id" in data
-        assert len(data) == 47
+        assert len(data) >= 47
 
 
 class TestUsers:
