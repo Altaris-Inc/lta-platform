@@ -441,7 +441,8 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
         r"indicator", r"channel", r"purpose", r"rate$", r"score$", r"balance$",
         r"vintage", r"cohort", r"orig", r"amount$", r"term$", r"income",
         r"month$", r"year$", r"quarter", r"number$", r"count$", r"ratio$",
-        r"pct$", r"percent", r"^period",
+        r"pct$", r"percent", r"^period", r"months_since", r"days_since",
+        r"_rate$", r"_score$", r"_index$", r"_flag$", r"_indicator$",
     ]
     for col in df.columns:
         if col in already_period or col in cum_cols:
@@ -508,8 +509,10 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
             if cum_col not in group.columns:
                 continue
             vals = group[cum_col].apply(parse_numeric)
+            if vals.notna().sum() == 0:
+                continue  # skip entirely non-numeric columns
             diffs = vals.diff().clip(lower=0)
-            diffs.iloc[0] = vals.iloc[0]  # first period = cumulative value
+            diffs.iloc[0] = vals.iloc[0] if pd.notna(vals.iloc[0]) else 0.0
             group[period_col_name] = diffs
 
         loan_groups.append(group)
