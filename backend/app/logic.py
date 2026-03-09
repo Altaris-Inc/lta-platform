@@ -499,9 +499,10 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
     loan_groups = []
     for loan_id, group in df.groupby(id_col, sort=False):
         # Sort this loan's rows by date
-        if sort_col and sort_col in group.columns:
-            group = group.sort_values(sort_col)
         group = group.copy()
+        if period_col and period_col in group.columns:
+            group['_grp_sort'] = pd.to_datetime(group[period_col], errors='coerce')
+            group = group.sort_values('_grp_sort').drop(columns=['_grp_sort'])
 
         for cum_col, period_col_name in period_names.items():
             if cum_col not in group.columns:
