@@ -519,6 +519,12 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
 
     df = pd.concat(loan_groups).reset_index(drop=True)
 
+    # Re-sort the concatenated df by loan_id + date so output is in chronological order
+    if sort_col and sort_col in df.columns:
+        df = df.sort_values([id_col, sort_col]).reset_index(drop=True)
+    elif period_col and period_col in df.columns:
+        df = df.sort_values([id_col, period_col]).reset_index(drop=True)
+
     for cum_col, period_col_name in period_names.items():
         log.append(f"✅ Derived '{period_col_name}' from '{cum_col}' across {df[id_col].nunique():,} loans")
 
