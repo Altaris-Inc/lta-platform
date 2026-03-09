@@ -575,19 +575,31 @@ def process_longitudinal(df: pd.DataFrame, mp: dict) -> tuple:
     grouped = df.groupby(id_col)
 
     # Step 2b: Decompose explicitly mapped cumulative fields (principal + interest)
+    # Use same per-loan sort+diff approach to avoid index alignment issues
+    sort_col_2b = "_parsed_date" if "_parsed_date" in df.columns else date_col
+
+    def _safe_diff(df, col, sort_col):
+        """Per-loan sorted diff, returns series aligned to df.index."""
+        groups = []
+        for _, grp in df.groupby(id_col, sort=False):
+            grp = grp.copy()
+            if sort_col and sort_col in grp.columns:
+                grp = grp.sort_values(sort_col)
+            vals = grp[col].apply(parse_numeric)
+            diffs = vals.diff().clip(lower=0)
+            diffs.iloc[0] = vals.iloc[0]
+            grp["_result"] = diffs
+            groups.append(grp)
+        return pd.concat(groups)["_result"].reindex(df.index)
+
     cum_princ_col = mp.get("cumulative_principal_paid")
     if cum_princ_col and cum_princ_col in df.columns:
-        vals = df[cum_princ_col].apply(parse_numeric)
-        df["_period_principal"] = grouped.apply(
-            lambda g: g[cum_princ_col].apply(parse_numeric).diff().fillna(g[cum_princ_col].apply(parse_numeric).iloc[0])
-        ).reset_index(level=0, drop=True)
+        df["_period_principal"] = _safe_diff(df, cum_princ_col, sort_col_2b)
         log.append(f"Decomposed {cum_princ_col} → _period_principal")
 
     cum_int_col = mp.get("cumulative_interest_paid")
     if cum_int_col and cum_int_col in df.columns:
-        df["_period_interest"] = grouped.apply(
-            lambda g: g[cum_int_col].apply(parse_numeric).diff().fillna(g[cum_int_col].apply(parse_numeric).iloc[0])
-        ).reset_index(level=0, drop=True)
+        df["_period_interest"] = _safe_diff(df, cum_int_col, sort_col_2b)
         log.append(f"Decomposed {cum_int_col} → _period_interest")
 
     # Use existing period fields if available (they take priority over derived)
@@ -607,13 +619,16 @@ def process_longitudinal(df: pd.DataFrame, mp: dict) -> tuple:
 
     # Derive principal from balance change if not already computed
     if bal_col and bal_col in df.columns and "_period_principal" not in df.columns:
-        bal_vals = df[bal_col].apply(parse_numeric)
-        df["_period_principal"] = -grouped.apply(
-            lambda g: g[bal_col].apply(parse_numeric).diff()
-        ).reset_index(level=0, drop=True)
-        # First row per loan has no prior — NaN
-        first_idx = grouped.head(1).index
-        df.loc[first_idx, "_period_principal"] = np.nan
+        groups = []
+        for _, grp in df.groupby(id_col, sort=False):
+            grp = grp.copy()
+            if sort_col_2b and sort_col_2b in grp.columns:
+                grp = grp.sort_values(sort_col_2b)
+            bal = grp[bal_col].apply(parse_numeric)
+            grp["_period_principal"] = -bal.diff()
+            grp.iloc[0, grp.columns.get_loc("_period_principal")] = np.nan
+            groups.append(grp)
+        df = pd.concat(groups).reset_index(drop=True)
         log.append(f"Derived _period_principal from balance change ({bal_col})")
 
     # Derive interest = payment - principal
@@ -627,7 +642,8 @@ def process_longitudinal(df: pd.DataFrame, mp: dict) -> tuple:
             df["_derived_payment"] = df["_period_principal"] + df["_period_interest"]
             log.append("Derived _derived_payment = _period_principal + _period_interest")
 
-    # Step 4: Extract latest snapshot per loan
+    # Step 4: Refresh grouped from updated df, then extract latest snapshot
+    grouped = df.groupby(id_col)
     latest = grouped.tail(1).copy()
 
     # Compute loan-level aggregates from time-series
