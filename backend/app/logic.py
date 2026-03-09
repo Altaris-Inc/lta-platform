@@ -527,32 +527,32 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
             log.append(f"Skipping '{cum_col}' — no numeric values")
             continue
 
-        # Derive period values by:
-        # 1. Sort a working copy by loan_id + date
-        # 2. Diff within each loan group
-        # 3. Map results back to original df index using the sorted index
-
-        work_cols = [id_col, cum_col]
+        # Derive period values correctly regardless of index state:
+        # Sort a working copy, diff, then merge back by position marker
+        work = df[[id_col, cum_col]].copy()
         if sort_key and sort_key in df.columns:
-            work_cols.append(sort_key)
+            work[sort_key] = df[sort_key]
 
-        work = df[work_cols].copy()
+        # Add a positional marker to track original row positions
+        work["_orig_pos"] = range(len(work))
         work["_num"] = work[cum_col].apply(parse_numeric)
 
+        # Sort by loan + date
         if sort_key and sort_key in work.columns:
-            work = work.sort_values([id_col, sort_key])
+            work = work.sort_values([id_col, sort_key]).reset_index(drop=True)
         else:
-            work = work.sort_values([id_col])
+            work = work.sort_values([id_col]).reset_index(drop=True)
 
-        # Diff within each loan — groupby on already-sorted work df
-        work["_period"] = work.groupby(id_col)["_num"].diff().clip(lower=0)
+        # Diff within each loan on the cleanly sorted DataFrame
+        work["_period"] = work.groupby(id_col, sort=False)["_num"].diff().clip(lower=0)
 
-        # First row per loan (after sort) gets the cumulative value itself
+        # First row per loan gets the cumulative value itself
         first_mask = ~work.duplicated(subset=[id_col], keep="first")
         work.loc[first_mask, "_period"] = work.loc[first_mask, "_num"]
 
-        # Map back to original df index
-        df[period_col_name] = work["_period"].reindex(df.index)
+        # Map back to original positions using the positional marker
+        work_sorted = work.set_index("_orig_pos")["_period"]
+        df[period_col_name] = work_sorted.reindex(range(len(df))).values
 
         log.append(
             f"✅ Derived '{period_col_name}' from '{cum_col}' "
