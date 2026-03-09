@@ -527,19 +527,32 @@ def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
             log.append(f"Skipping '{cum_col}' — no numeric values")
             continue
 
-        # Diff within each loan group, sorted by date within each group
-        # Use apply (not transform) to avoid index-alignment issues
-        def _derive_periods(group):
-            if sort_key and sort_key in group.columns:
-                group = group.sort_values(sort_key)
-            vals = group[cum_col].apply(parse_numeric)
-            result = vals.diff().clip(lower=0)
-            # First period = cumulative value itself
-            result.iloc[0] = vals.iloc[0]
-            return result
+        # Derive period values by:
+        # 1. Sort a working copy by loan_id + date
+        # 2. Diff within each loan group
+        # 3. Map results back to original df index using the sorted index
 
-        period_series = df.groupby(id_col, group_keys=False).apply(_derive_periods)
-        df[period_col_name] = period_series.reset_index(level=0, drop=True)
+        work_cols = [id_col, cum_col]
+        if sort_key and sort_key in df.columns:
+            work_cols.append(sort_key)
+
+        work = df[work_cols].copy()
+        work["_num"] = work[cum_col].apply(parse_numeric)
+
+        if sort_key and sort_key in work.columns:
+            work = work.sort_values([id_col, sort_key])
+        else:
+            work = work.sort_values([id_col])
+
+        # Diff within each loan — groupby on already-sorted work df
+        work["_period"] = work.groupby(id_col)["_num"].diff().clip(lower=0)
+
+        # First row per loan (after sort) gets the cumulative value itself
+        first_mask = ~work.duplicated(subset=[id_col], keep="first")
+        work.loc[first_mask, "_period"] = work.loc[first_mask, "_num"]
+
+        # Map back to original df index
+        df[period_col_name] = work["_period"].reindex(df.index)
 
         log.append(
             f"✅ Derived '{period_col_name}' from '{cum_col}' "
