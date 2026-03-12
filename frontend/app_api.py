@@ -13,6 +13,15 @@ import plotly.graph_objects as go
 import os
 from api_client import LTAClient
 
+def _get_version():
+    try:
+        version_file = os.path.join(os.path.dirname(__file__), "VERSION")
+        return open(version_file).read().strip()
+    except Exception:
+        return "dev"
+
+VERSION = _get_version()
+
 # ═══════════════════════════════════════════════════════════════
 # PAGE CONFIG
 # ═══════════════════════════════════════════════════════════════
@@ -638,6 +647,7 @@ with sc2:
         st.rerun()
 
 st.sidebar.markdown(f'<span style="color:#566375;font-size:9px">Mapped: {len(mp)} fields</span>', unsafe_allow_html=True)
+st.sidebar.markdown(f'<span style="color:#3a4250;font-size:9px">{VERSION}</span>', unsafe_allow_html=True)
 
 
 # ═══════════════════════════════════════════════════════════════
