@@ -116,6 +116,119 @@ async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db)):
 # ═══════════════════════════════════════════════════════════════
 
 @app.post("/api/tapes", response_model=TapeOut, tags=["Tapes"])
+def _ai_is_header_row(row_values: list, openai_key: str = None) -> bool:
+    """
+    Ask the AI whether a row looks like column headers or metadata/data.
+    Returns True if it looks like headers, False otherwise.
+    Falls back to True if AI is unavailable.
+    """
+    import os, json as _json, httpx
+    openai_key = openai_key or os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        return None  # can't determine
+
+    sample = str(row_values[:20])  # first 20 values
+    prompt = f"""I am reading a loan tape CSV file. The following is a row from the file:
+
+{sample}
+
+Does this row look like COLUMN HEADERS (field names like loan_id, balance, date, etc.) 
+or does it look like METADATA / DATA (like a date, title, "As of 12/31/25", numbers, etc.)?
+
+Respond with ONLY one word: HEADERS or METADATA"""
+
+    try:
+        base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+        resp = httpx.post(
+            f"{base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+            json={"model": "gpt-4o-mini", "max_tokens": 10,
+                  "messages": [{"role": "user", "content": prompt}]},
+            timeout=10, verify=False,
+        )
+        resp.raise_for_status()
+        answer = resp.json()["choices"][0]["message"]["content"].strip().upper()
+        return "HEADER" in answer
+    except Exception as e:
+        print(f"AI header detection failed: {e}")
+        return None
+
+
+def _looks_like_headers(row_values: list) -> bool:
+    """
+    Heuristic check: a header row should have mostly short string labels,
+    not dates, long sentences, or purely numeric values.
+    """
+    import re
+    date_pat = re.compile(r'^\d{1,4}[\/\-\.]\d{1,2}([\/\-\.]\d{1,4})?$')
+    score = 0
+    for v in row_values:
+        s = str(v).strip()
+        if not s or s.lower() in ("nan", "none", ""):
+            continue
+        # Looks bad (data-like)
+        if date_pat.match(s):
+            score -= 2
+        elif s.replace(".", "", 1).replace("-", "", 1).isdigit():
+            score -= 1
+        elif len(s) > 40:
+            score -= 2
+        elif any(word in s.lower() for word in ["as of", "report", "total", "summary", "sheet"]):
+            score -= 3
+        # Looks good (header-like)
+        elif re.match(r'^[a-zA-Z][a-zA-Z0-9_\s]{1,30}$', s):
+            score += 1
+    return score > 0
+
+
+def _read_tape(content: bytes, filename: str = "") -> pd.DataFrame:
+    """
+    Read a CSV or Excel file, auto-detecting the header row (rows 0-3).
+    Uses heuristic first, then AI fallback for ambiguous cases.
+    """
+    import os
+    is_excel = filename.lower().endswith((".xlsx", ".xls"))
+    openai_key = os.getenv("OPENAI_API_KEY")
+
+    candidates = []
+    for header_row in range(4):
+        try:
+            if is_excel:
+                df = pd.read_excel(io.BytesIO(content), header=header_row)
+            else:
+                df = pd.read_csv(io.BytesIO(content), header=header_row)
+            candidates.append((header_row, df))
+        except Exception:
+            continue
+
+    if not candidates:
+        # Last resort fallback
+        if is_excel:
+            return pd.read_excel(io.BytesIO(content))
+        return pd.read_csv(io.BytesIO(content))
+
+    # Try heuristic first
+    for header_row, df in candidates:
+        row_vals = list(df.columns)
+        if _looks_like_headers(row_vals):
+            print(f"Header row detected at row {header_row} (heuristic)")
+            return df
+
+    # Heuristic inconclusive — ask AI
+    for header_row, df in candidates:
+        row_vals = list(df.columns)
+        ai_result = _ai_is_header_row(row_vals, openai_key)
+        if ai_result is True:
+            print(f"Header row detected at row {header_row} (AI)")
+            return df
+        elif ai_result is False:
+            continue
+
+    # Fallback to row 0
+    print("Header detection inconclusive — defaulting to row 0")
+    return candidates[0][1]
+
+
 async def upload_tape(
     file: UploadFile = File(...),
     db: AsyncSession = Depends(get_db),
@@ -123,7 +236,7 @@ async def upload_tape(
 ):
     """Upload a CSV loan tape. Auto-matches columns, detects type, processes longitudinal."""
     content = await file.read()
-    df = pd.read_csv(io.BytesIO(content))
+    df = _read_tape(content, file.filename)
     hdrs = list(df.columns)
 
     # Try template auto-detect
