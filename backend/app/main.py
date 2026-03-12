@@ -116,45 +116,7 @@ async def create_user(body: UserCreate, db: AsyncSession = Depends(get_db)):
 # ═══════════════════════════════════════════════════════════════
 
 @app.post("/api/tapes", response_model=TapeOut, tags=["Tapes"])
-def _ai_is_header_row(row_values: list, openai_key: str = None) -> bool:
-    """
-    Ask the AI whether a row looks like column headers or metadata/data.
-    Returns True if it looks like headers, False otherwise.
-    Falls back to True if AI is unavailable.
-    """
-    import os, json as _json, httpx
-    openai_key = openai_key or os.getenv("OPENAI_API_KEY")
-    if not openai_key:
-        return None  # can't determine
-
-    sample = str(row_values[:20])  # first 20 values
-    prompt = f"""I am reading a loan tape CSV file. The following is a row from the file:
-
-{sample}
-
-Does this row look like COLUMN HEADERS (field names like loan_id, balance, date, etc.) 
-or does it look like METADATA / DATA (like a date, title, "As of 12/31/25", numbers, etc.)?
-
-Respond with ONLY one word: HEADERS or METADATA"""
-
-    try:
-        base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
-        resp = httpx.post(
-            f"{base_url}/chat/completions",
-            headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
-            json={"model": "gpt-4o-mini", "max_tokens": 10,
-                  "messages": [{"role": "user", "content": prompt}]},
-            timeout=10, verify=False,
-        )
-        resp.raise_for_status()
-        answer = resp.json()["choices"][0]["message"]["content"].strip().upper()
-        return "HEADER" in answer
-    except Exception as e:
-        print(f"AI header detection failed: {e}")
-        return None
-
-
-def _looks_like_headers(row_values: list) -> bool:
+def _looks_like_headers(vals: list) -> bool:
     """
     Heuristic check: a header row should have mostly short string labels,
     not dates, long sentences, or purely numeric values.
@@ -162,7 +124,7 @@ def _looks_like_headers(row_values: list) -> bool:
     import re
     date_pat = re.compile(r'^\d{1,4}[\/\-\.]\d{1,2}([\/\-\.]\d{1,4})?$')
     score = 0
-    for v in row_values:
+    for v in vals:
         s = str(v).strip()
         if not s or s.lower() in ("nan", "none", ""):
             continue
