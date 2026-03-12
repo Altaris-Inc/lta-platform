@@ -214,16 +214,6 @@ def _read_tape(content: bytes, filename: str = "") -> pd.DataFrame:
             print(f"Header row detected at row {header_row} (heuristic)")
             return df
 
-    # Heuristic inconclusive — ask AI
-    for header_row, df in candidates:
-        row_vals = list(df.columns)
-        ai_result = _ai_is_header_row(row_vals, openai_key)
-        if ai_result is True:
-            print(f"Header row detected at row {header_row} (AI)")
-            return df
-        elif ai_result is False:
-            continue
-
     # Fallback to row 0
     print("Header detection inconclusive — defaulting to row 0")
     return candidates[0][1]
