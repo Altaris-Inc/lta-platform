@@ -1295,6 +1295,7 @@ elif page == "📋 Column Mapping":
     ]
 
     options = ["— (unmapped)"] + sorted(hdrs)
+    def _strip_currency(s): return s.replace("$", "").replace("£", "").replace("€", "").strip()
     new_mp = dict(mp)
     changed = False
 
