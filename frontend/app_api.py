@@ -1320,11 +1320,35 @@ elif page == "📋 Column Mapping":
             with container:
                 label = mapped_fields[fk]
                 current = mp.get(fk, "")
-                default_idx = options.index(current) if current in options else 0
                 icon = _tier_icon(fk)
-                sel = st.selectbox(f"{icon} {label}", options, index=default_idx, key=f"m_{fk}")
-                if sel == "— (unmapped)":
-                    if fk in new_mp:
+                # Top 5 best matches first, then divider, then rest
+                scored = []
+                for h in sorted(hdrs):
+                    hl = h.lower().replace("_", " ")
+                    ll = fk.lower().replace("_", " ")
+                    score = 0
+                    if hl == ll: score = 10
+                    elif ll in hl or hl in ll: score = 5
+                    elif any(w in hl for w in ll.split() if len(w) > 2): score = 2
+                    scored.append((score, h))
+                scored.sort(key=lambda x: -x[0])
+                top5 = [h for _, h in scored[:5] if _ > 0]
+                rest = [h for h in sorted(hdrs) if h not in top5]
+                smart_options = ["— (unmapped)"]
+                if top5:
+                    smart_options += top5 + ["─────────────"]
+                smart_options += rest
+                default_idx = smart_options.index(current) if current in smart_options else 0
+                # Horizontal: label left, dropdown right
+                c_lbl, c_sel = st.columns([1, 2])
+                with c_lbl:
+                    st.markdown(f'<div style="font-size:11px;color:#8494A7;padding-top:8px">{icon} {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                with c_sel:
+                    sel = st.selectbox("x", smart_options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
+                if sel == "— (unmapped)" or sel == "─────────────":
+                    if sel == "─────────────":
+                        sel = current  # ignore divider selection
+                    if fk in new_mp and sel == "— (unmapped)":
                         del new_mp[fk]
                         changed = True
                 else:
@@ -1345,8 +1369,28 @@ elif page == "📋 Column Mapping":
                 container = col_l2 if i < mid2 else col_r2
                 with container:
                     label = unmapped_ref[fk]
-                    sel = st.selectbox(f"⚪ {label}", options, index=0, key=f"m_{fk}")
-                    if sel != "— (unmapped)":
+                    scored = []
+                    for h in sorted(hdrs):
+                        hl = h.lower().replace("_", " ")
+                        ll = fk.lower().replace("_", " ")
+                        score = 0
+                        if hl == ll: score = 10
+                        elif ll in hl or hl in ll: score = 5
+                        elif any(w in hl for w in ll.split() if len(w) > 2): score = 2
+                        scored.append((score, h))
+                    scored.sort(key=lambda x: -x[0])
+                    top5 = [h for _, h in scored[:5] if _ > 0]
+                    rest = [h for h in sorted(hdrs) if h not in top5]
+                    smart_options = ["— (unmapped)"]
+                    if top5:
+                        smart_options += top5 + ["─────────────"]
+                    smart_options += rest
+                    c_lbl, c_sel = st.columns([1, 2])
+                    with c_lbl:
+                        st.markdown(f'<div style="font-size:11px;color:#8494A7;padding-top:8px">⚪ {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                    with c_sel:
+                        sel = st.selectbox("x", smart_options, index=0, key=f"m_{fk}", label_visibility="collapsed")
+                    if sel != "— (unmapped)" and sel != "─────────────":
                         new_mp[fk] = sel
                         changed = True
 
