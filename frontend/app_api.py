@@ -45,7 +45,9 @@ st.markdown("""
     .accent { color: #00D4AA; }
     .info-bar { background: #171C24; border-radius: 8px; padding: 8px 16px; border: 1px solid #1E2530;
     /* Compact mapping dropdowns */
-    div[data-testid="stSelectbox"] > div > div { font-size: 11px !important; min-height: 28px !important; padding: 2px 8px !important; } margin-bottom: 12px; }
+    div[data-testid="stSelectbox"] > div > div { font-size: 11px !important; min-height: 28px !important; padding: 2px 6px !important; }
+    div[data-testid="stSelectbox"] span { font-size: 11px !important; }
+    div[data-testid="stSelectbox"] > label { display: none !important; } margin-bottom: 12px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1307,7 +1309,7 @@ elif page == "📋 Column Mapping":
     if mapped_fields:
         st.markdown(f'<span style="color:#00D4AA;font-size:13px;font-weight:600">✓ Mapped ({len(mapped_fields)})</span>', unsafe_allow_html=True)
         mapped_keys = sorted(mapped_fields.keys())
-        cols6 = st.columns(6)
+        cols3 = st.columns(3)
 
         # Tier badge helper
         def _tier_icon(fk):
@@ -1318,7 +1320,7 @@ elif page == "📋 Column Mapping":
             return "🟢"
 
         for i, fk in enumerate(mapped_keys):
-            with cols6[i % 6]:
+            with cols3[i % 3]:
                 label = mapped_fields[fk]
                 current = mp.get(fk, "")
                 icon = _tier_icon(fk)
@@ -1339,8 +1341,11 @@ elif page == "📋 Column Mapping":
                     smart_options += top5 + ["─────────────"]
                 smart_options += rest
                 default_idx = smart_options.index(current) if current in smart_options else 0
-                st.markdown(f'<div style="font-size:10px;color:#8494A7;margin-bottom:2px">{icon} {_strip_currency(label)}</div>', unsafe_allow_html=True)
-                sel = st.selectbox("x", smart_options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
+                _cl, _cd = st.columns([1, 2])
+                with _cl:
+                    st.markdown(f'<div style="font-size:10px;color:#8494A7;padding-top:10px;line-height:1.2">{icon} {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                with _cd:
+                    sel = st.selectbox("x", smart_options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
                 if sel == "— (unmapped)" or sel == "─────────────":
                     if sel == "─────────────":
                         sel = current
@@ -1358,9 +1363,9 @@ elif page == "📋 Column Mapping":
     if unmapped_ref:
         with st.expander(f"⚪ Unmapped ({len(unmapped_ref)})", expanded=False):
             unmapped_keys = sorted(unmapped_ref.keys())
-            ucols6 = st.columns(6)
+            ucols6 = st.columns(3)
             for i, fk in enumerate(unmapped_keys):
-                with ucols6[i % 6]:
+                with ucols6[i % 3]:
                     label = unmapped_ref[fk]
                     scored = []
                     for h in sorted(hdrs):
@@ -1378,8 +1383,11 @@ elif page == "📋 Column Mapping":
                     if top5:
                         smart_options += top5 + ["─────────────"]
                     smart_options += rest
-                    st.markdown(f'<div style="font-size:10px;color:#8494A7;margin-bottom:2px">⚪ {_strip_currency(label)}</div>', unsafe_allow_html=True)
-                    sel = st.selectbox("x", smart_options, index=0, key=f"m_{fk}", label_visibility="collapsed")
+                    _cl, _cd = st.columns([1, 2])
+                    with _cl:
+                        st.markdown(f'<div style="font-size:10px;color:#8494A7;padding-top:10px;line-height:1.2">⚪ {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                    with _cd:
+                        sel = st.selectbox("x", smart_options, index=0, key=f"m_{fk}", label_visibility="collapsed")
                     if sel != "— (unmapped)" and sel != "─────────────":
                         new_mp[fk] = sel
                         changed = True
@@ -1388,14 +1396,17 @@ elif page == "📋 Column Mapping":
     if extra_mapped:
         with st.expander(f"➕ Additional Mapped Fields ({len(extra_mapped)})", expanded=False):
             extra_keys = sorted(extra_mapped.keys())
-            ecols6 = st.columns(6)
+            ecols6 = st.columns(3)
             for i, fk in enumerate(extra_keys):
-                with ecols6[i % 6]:
+                with ecols6[i % 3]:
                     label = extra_mapped[fk]
                     current = mp.get(fk, "")
                     default_idx = options.index(current) if current in options else 0
-                    st.markdown(f'<div style="font-size:10px;color:#8494A7;margin-bottom:2px">🔵 {_strip_currency(label)}</div>', unsafe_allow_html=True)
-                    sel = st.selectbox("x", options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
+                    _cl, _cd = st.columns([1, 2])
+                    with _cl:
+                        st.markdown(f'<div style="font-size:10px;color:#8494A7;padding-top:10px;line-height:1.2">🔵 {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                    with _cd:
+                        sel = st.selectbox("x", options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
                     if sel == "— (unmapped)":
                         if fk in new_mp:
                             del new_mp[fk]
