@@ -1343,7 +1343,7 @@ elif page == "📋 Column Mapping":
                 default_idx = smart_options.index(current) if current in smart_options else 0
                 _cl, _cd = st.columns([1, 2])
                 with _cl:
-                    st.markdown(f'<div style="font-size:10px;color:#8494A7;padding-top:10px;line-height:1.2">{icon} {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:12px;color:#E8ECF1;font-weight:600;padding-top:8px;line-height:1.2">{icon} {_strip_currency(label)}</div>', unsafe_allow_html=True)
                 with _cd:
                     sel = st.selectbox("x", smart_options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
                 if sel == "— (unmapped)" or sel == "─────────────":
@@ -1385,7 +1385,7 @@ elif page == "📋 Column Mapping":
                     smart_options += rest
                     _cl, _cd = st.columns([1, 2])
                     with _cl:
-                        st.markdown(f'<div style="font-size:10px;color:#8494A7;padding-top:10px;line-height:1.2">⚪ {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div style="font-size:12px;color:#E8ECF1;font-weight:600;padding-top:8px;line-height:1.2">⚪ {_strip_currency(label)}</div>', unsafe_allow_html=True)
                     with _cd:
                         sel = st.selectbox("x", smart_options, index=0, key=f"m_{fk}", label_visibility="collapsed")
                     if sel != "— (unmapped)" and sel != "─────────────":
@@ -1404,7 +1404,7 @@ elif page == "📋 Column Mapping":
                     default_idx = options.index(current) if current in options else 0
                     _cl, _cd = st.columns([1, 2])
                     with _cl:
-                        st.markdown(f'<div style="font-size:10px;color:#8494A7;padding-top:10px;line-height:1.2">🔵 {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div style="font-size:12px;color:#E8ECF1;font-weight:600;padding-top:8px;line-height:1.2">🔵 {_strip_currency(label)}</div>', unsafe_allow_html=True)
                     with _cd:
                         sel = st.selectbox("x", options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
                     if sel == "— (unmapped)":
