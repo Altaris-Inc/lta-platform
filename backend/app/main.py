@@ -26,6 +26,7 @@ from app.logic import (
     rule_match, score_template, analyze, validate,
     detect_tape_type, process_longitudinal,
     parse_numeric, calc_regression, calc_multi_regression,
+    ai_rank_candidates,
 )
 
 
@@ -570,3 +571,43 @@ async def list_standard_fields():
     return {k: {"label": v["label"], "pattern_count": len(v["patterns"]),
                 "tier": FIELD_TIERS.get(k, "optional")}
             for k, v in STD_FIELDS.items()}
+
+
+@app.get("/api/tapes/{tape_id}/suggest/{field_key}", tags=["Mapping"])
+async def suggest_field_mapping(
+    tape_id: str,
+    field_key: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Return AI-ranked top candidate columns for a specific standard field."""
+    result = await db.execute(
+        select(Tape).where(Tape.id == tape_id, Tape.user_id == user.id)
+    )
+    tape = result.scalar_one_or_none()
+    if not tape:
+        raise HTTPException(404, "Tape not found")
+
+    df = _get_tape_df(tape_id)
+    hdrs = list(df.columns)
+
+    field_def = STD_FIELDS.get(field_key)
+    if not field_def:
+        raise HTTPException(404, f"Unknown field: {field_key}")
+
+    import os
+    openai_key = os.getenv("OPENAI_API_KEY")
+    if not openai_key:
+        return {"suggestions": [], "error": "No AI key configured"}
+
+    # Exclude already-mapped columns as candidates
+    current_mapping = tape.mapping or {}
+    mapped_cols = set(current_mapping.values())
+    candidates = [h for h in hdrs if h not in mapped_cols][:50]
+
+    ranked = ai_rank_candidates(field_key, field_def, candidates, df, openai_key)
+
+    return {
+        "field_key": field_key,
+        "suggestions": [{"col": col, "score": score} for score, col in ranked if score > 0]
+    }

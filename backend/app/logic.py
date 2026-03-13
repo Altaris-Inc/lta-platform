@@ -950,6 +950,88 @@ def calc_multi_regression(x1: np.ndarray, x2: np.ndarray, y: np.ndarray) -> Opti
 # AI AUTO-MATCH (OpenAI or Anthropic)
 # ═══════════════════════════════════════════════════════════════
 
+def ai_rank_candidates(
+    field_key: str,
+    field_def: dict,
+    candidate_cols: list,
+    df: pd.DataFrame,
+    openai_key: str = None,
+) -> list:
+    """
+    Use AI to rank candidate columns for a specific standard field.
+    Returns list of (score, col_name) sorted descending, score 0-10.
+    Falls back to empty list on failure.
+    """
+    import os, json as _json
+    openai_key = openai_key or os.getenv("OPENAI_API_KEY")
+    if not openai_key or not candidate_cols:
+        return []
+
+    label = field_def.get("label", field_key)
+    description = field_def.get("description", "")
+
+    # Build sample values per candidate column
+    col_samples = {}
+    for col in candidate_cols:
+        if col in df.columns:
+            samples = df[col].dropna().head(5).tolist()
+            col_samples[col] = samples
+
+    col_info = "\n".join(
+        f"  - {col}: sample values = {col_samples.get(col, [])}"
+        for col in candidate_cols
+    )
+
+    prompt = f"""You are an ABS loan tape analyst. Score how well each source column matches a standard field.
+
+Standard field: "{field_key}"
+Label: "{label}"
+Description: "{description}"
+
+Candidate source columns with sample values:
+{col_info}
+
+Score each column 0-10 for how likely it maps to "{label}":
+- 10 = almost certain match (same concept, compatible data type)
+- 5  = plausible match
+- 0  = no match (wrong concept or data type)
+
+Consider:
+- Semantic meaning (e.g. "OutstandingPrincipal" is a strong match for "current_balance")
+- Data type (dates should not match amount fields, strings should not match numeric fields)
+- Sample values (do they look like typical values for this field?)
+
+Respond ONLY with a JSON object mapping column_name to score (integer 0-10).
+Example: {{"OutstandingPrincipal": 9, "OriginalBalance": 3, "LoanDate": 0}}
+No explanation, no markdown, just JSON."""
+
+    try:
+        import httpx
+        base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+        resp = httpx.post(
+            f"{base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+            json={
+                "model": "gpt-4o-mini",
+                "max_tokens": 500,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=15,
+            verify=False,
+        )
+        resp.raise_for_status()
+        text = resp.json()["choices"][0]["message"]["content"].strip()
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        scores = _json.loads(text)
+        result = [(int(v), k) for k, v in scores.items() if k in candidate_cols]
+        result.sort(key=lambda x: -x[0])
+        return result
+    except Exception as e:
+        print(f"ai_rank_candidates failed for {field_key}: {e}")
+        return []
+
+
 def ai_match(df: pd.DataFrame, fields: Optional[dict] = None, api_key: Optional[str] = None) -> Optional[dict]:
     """
     Use AI (OpenAI GPT or Anthropic Claude) to match CSV columns to standard ABS fields.

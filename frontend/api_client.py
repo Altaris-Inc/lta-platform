@@ -98,6 +98,10 @@ class LTAClient:
     def auto_match(self, tape_id: str, mode: str = "rule") -> dict:
         return self._request("POST", f"/api/tapes/{tape_id}/automatch", params={"mode": mode})
 
+    def suggest_field(self, tape_id: str, field_key: str) -> dict:
+        """Get AI-ranked column suggestions for a specific standard field."""
+        return self._request("GET", f"/api/tapes/{tape_id}/suggest/{field_key}")
+
     # ── Analysis ──
     def get_analysis(self, tape_id: str) -> dict:
         return self._request("GET", f"/api/tapes/{tape_id}/analysis")

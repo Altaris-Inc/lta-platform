@@ -68,6 +68,50 @@ for dk in ["_drill_show", "_drill_title", "_drill_bucket", "_drill_mp"]:
 
 def get_client(): return LTAClient(api_key=st.session_state.api_key)
 
+def _get_ai_suggestions(tape_id, field_key, hdrs, fk_label):
+    """Fetch AI-ranked suggestions for a field, with session state cache."""
+    cache_key = f"_ai_suggest_{tape_id}_{field_key}"
+    if cache_key in st.session_state:
+        return st.session_state[cache_key]
+    try:
+        client = get_client()
+        result = client.suggest_field(tape_id, field_key)
+        suggestions = result.get("suggestions", [])
+        top5 = [s["col"] for s in suggestions[:5] if s["col"] in hdrs]
+    except Exception as e:
+        top5 = []
+    st.session_state[cache_key] = top5
+    return top5
+
+def _heuristic_top5(fk, hdrs):
+    """Fast heuristic fallback for ranking candidates."""
+    scored = []
+    for h in sorted(hdrs):
+        hl = h.lower().replace("_", " ")
+        ll = fk.lower().replace("_", " ")
+        score = 0
+        if hl == ll: score = 10
+        elif ll in hl or hl in ll: score = 5
+        elif any(w in hl for w in ll.split() if len(w) > 2): score = 2
+        scored.append((score, h))
+    scored.sort(key=lambda x: -x[0])
+    return [h for s, h in scored[:5] if s > 0]
+
+def _smart_options(fk, hdrs, tape_id=None, use_ai=False, label=""):
+    """Build dropdown options: top 5 (AI or heuristic) then divider then rest."""
+    if use_ai and tape_id:
+        top5 = _get_ai_suggestions(tape_id, fk, hdrs, label)
+        if not top5:
+            top5 = _heuristic_top5(fk, hdrs)
+    else:
+        top5 = _heuristic_top5(fk, hdrs)
+    rest = [h for h in sorted(hdrs) if h not in top5]
+    opts = ["— (unmapped)"]
+    if top5:
+        opts += top5 + ["─────────────"]
+    opts += rest
+    return opts
+
 
 # ═══════════════════════════════════════════════════════════════
 # DRILL-DOWN DIALOG
@@ -1303,7 +1347,19 @@ elif page == "📋 Column Mapping":
     new_mp = dict(mp)
     changed = False
 
-    st.markdown(f'<span style="color:#8494A7;font-size:11px">{ref_label} · {len(mapped_fields)}/{total_ref} mapped</span>', unsafe_allow_html=True)
+    # AI suggestions toggle
+    _ai_col, _tog_col = st.columns([3, 1])
+    with _ai_col:
+        st.markdown(f'<span style="color:#8494A7;font-size:11px">{ref_label} · {len(mapped_fields)}/{total_ref} mapped</span>', unsafe_allow_html=True)
+    with _tog_col:
+        use_ai_toggle = st.toggle("🤖 AI Suggestions", value=st.session_state.get("_mapping_use_ai", False), key="_mapping_use_ai_toggle")
+        if use_ai_toggle != st.session_state.get("_mapping_use_ai", False):
+            st.session_state["_mapping_use_ai"] = use_ai_toggle
+            # Clear suggestion cache on toggle
+            for k in list(st.session_state.keys()):
+                if k.startswith("_ai_suggest_"):
+                    del st.session_state[k]
+            st.rerun()
 
     # ── Mapped Fields ──
     if mapped_fields:
@@ -1324,22 +1380,8 @@ elif page == "📋 Column Mapping":
                 label = mapped_fields[fk]
                 current = mp.get(fk, "")
                 icon = _tier_icon(fk)
-                scored = []
-                for h in sorted(hdrs):
-                    hl = h.lower().replace("_", " ")
-                    ll = fk.lower().replace("_", " ")
-                    score = 0
-                    if hl == ll: score = 10
-                    elif ll in hl or hl in ll: score = 5
-                    elif any(w in hl for w in ll.split() if len(w) > 2): score = 2
-                    scored.append((score, h))
-                scored.sort(key=lambda x: -x[0])
-                top5 = [h for _, h in scored[:5] if _ > 0]
-                rest = [h for h in sorted(hdrs) if h not in top5]
-                smart_options = ["— (unmapped)"]
-                if top5:
-                    smart_options += top5 + ["─────────────"]
-                smart_options += rest
+                use_ai = st.session_state.get("_mapping_use_ai", False)
+                smart_options = _smart_options(fk, hdrs, st.session_state.tape_id, use_ai, label)
                 default_idx = smart_options.index(current) if current in smart_options else 0
                 _cl, _cd = st.columns([1, 2])
                 with _cl:
@@ -1367,22 +1409,8 @@ elif page == "📋 Column Mapping":
             for i, fk in enumerate(unmapped_keys):
                 with ucols6[i % 3]:
                     label = unmapped_ref[fk]
-                    scored = []
-                    for h in sorted(hdrs):
-                        hl = h.lower().replace("_", " ")
-                        ll = fk.lower().replace("_", " ")
-                        score = 0
-                        if hl == ll: score = 10
-                        elif ll in hl or hl in ll: score = 5
-                        elif any(w in hl for w in ll.split() if len(w) > 2): score = 2
-                        scored.append((score, h))
-                    scored.sort(key=lambda x: -x[0])
-                    top5 = [h for _, h in scored[:5] if _ > 0]
-                    rest = [h for h in sorted(hdrs) if h not in top5]
-                    smart_options = ["— (unmapped)"]
-                    if top5:
-                        smart_options += top5 + ["─────────────"]
-                    smart_options += rest
+                    use_ai = st.session_state.get("_mapping_use_ai", False)
+                    smart_options = _smart_options(fk, hdrs, st.session_state.tape_id, use_ai, label)
                     _cl, _cd = st.columns([1, 2])
                     with _cl:
                         st.markdown(f'<div style="font-size:12px;color:#E8ECF1;font-weight:600;padding-top:8px;line-height:1.2">⚪ {_strip_currency(label)}</div>', unsafe_allow_html=True)
