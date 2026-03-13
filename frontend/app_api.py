@@ -43,7 +43,9 @@ st.markdown("""
     .metric-sub { color: #566375; font-size: 10px; }
     .section-header { background: linear-gradient(135deg, #00D4AA, #4D9EFF); -webkit-background-clip: text; -webkit-text-fill-color: transparent; font-size: 18px; font-weight: 700; margin: 8px 0 12px 0; }
     .accent { color: #00D4AA; }
-    .info-bar { background: #171C24; border-radius: 8px; padding: 8px 16px; border: 1px solid #1E2530; margin-bottom: 12px; }
+    .info-bar { background: #171C24; border-radius: 8px; padding: 8px 16px; border: 1px solid #1E2530;
+    /* Compact mapping dropdowns */
+    div[data-testid="stSelectbox"] > div > div { font-size: 11px !important; min-height: 28px !important; padding: 2px 8px !important; } margin-bottom: 12px; }
 </style>
 """, unsafe_allow_html=True)
 
@@ -1304,9 +1306,8 @@ elif page == "📋 Column Mapping":
     # ── Mapped Fields ──
     if mapped_fields:
         st.markdown(f'<span style="color:#00D4AA;font-size:13px;font-weight:600">✓ Mapped ({len(mapped_fields)})</span>', unsafe_allow_html=True)
-        col_l, col_r = st.columns(2)
         mapped_keys = sorted(mapped_fields.keys())
-        mid = (len(mapped_keys) + 1) // 2
+        cols6 = st.columns(6)
 
         # Tier badge helper
         def _tier_icon(fk):
@@ -1317,12 +1318,10 @@ elif page == "📋 Column Mapping":
             return "🟢"
 
         for i, fk in enumerate(mapped_keys):
-            container = col_l if i < mid else col_r
-            with container:
+            with cols6[i % 6]:
                 label = mapped_fields[fk]
                 current = mp.get(fk, "")
                 icon = _tier_icon(fk)
-                # Top 5 best matches first, then divider, then rest
                 scored = []
                 for h in sorted(hdrs):
                     hl = h.lower().replace("_", " ")
@@ -1340,15 +1339,11 @@ elif page == "📋 Column Mapping":
                     smart_options += top5 + ["─────────────"]
                 smart_options += rest
                 default_idx = smart_options.index(current) if current in smart_options else 0
-                # Horizontal: label left, dropdown right
-                c_lbl, c_sel = st.columns([1, 2])
-                with c_lbl:
-                    st.markdown(f'<div style="font-size:11px;color:#8494A7;padding-top:8px">{icon} {_strip_currency(label)}</div>', unsafe_allow_html=True)
-                with c_sel:
-                    sel = st.selectbox("x", smart_options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
+                st.markdown(f'<div style="font-size:10px;color:#8494A7;margin-bottom:2px">{icon} {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                sel = st.selectbox("x", smart_options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
                 if sel == "— (unmapped)" or sel == "─────────────":
                     if sel == "─────────────":
-                        sel = current  # ignore divider selection
+                        sel = current
                     if fk in new_mp and sel == "— (unmapped)":
                         del new_mp[fk]
                         changed = True
@@ -1362,13 +1357,10 @@ elif page == "📋 Column Mapping":
     # ── Unmapped Reference Fields (collapsed) ──
     if unmapped_ref:
         with st.expander(f"⚪ Unmapped ({len(unmapped_ref)})", expanded=False):
-            col_l2, col_r2 = st.columns(2)
             unmapped_keys = sorted(unmapped_ref.keys())
-            mid2 = (len(unmapped_keys) + 1) // 2
-
+            ucols6 = st.columns(6)
             for i, fk in enumerate(unmapped_keys):
-                container = col_l2 if i < mid2 else col_r2
-                with container:
+                with ucols6[i % 6]:
                     label = unmapped_ref[fk]
                     scored = []
                     for h in sorted(hdrs):
@@ -1386,11 +1378,8 @@ elif page == "📋 Column Mapping":
                     if top5:
                         smart_options += top5 + ["─────────────"]
                     smart_options += rest
-                    c_lbl, c_sel = st.columns([1, 2])
-                    with c_lbl:
-                        st.markdown(f'<div style="font-size:11px;color:#8494A7;padding-top:8px">⚪ {_strip_currency(label)}</div>', unsafe_allow_html=True)
-                    with c_sel:
-                        sel = st.selectbox("x", smart_options, index=0, key=f"m_{fk}", label_visibility="collapsed")
+                    st.markdown(f'<div style="font-size:10px;color:#8494A7;margin-bottom:2px">⚪ {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                    sel = st.selectbox("x", smart_options, index=0, key=f"m_{fk}", label_visibility="collapsed")
                     if sel != "— (unmapped)" and sel != "─────────────":
                         new_mp[fk] = sel
                         changed = True
@@ -1398,17 +1387,15 @@ elif page == "📋 Column Mapping":
     # ── Extra mapped fields (from rule-match, not in selected template/standard set) ──
     if extra_mapped:
         with st.expander(f"➕ Additional Mapped Fields ({len(extra_mapped)})", expanded=False):
-            col_l3, col_r3 = st.columns(2)
             extra_keys = sorted(extra_mapped.keys())
-            mid3 = (len(extra_keys) + 1) // 2
-
+            ecols6 = st.columns(6)
             for i, fk in enumerate(extra_keys):
-                container = col_l3 if i < mid3 else col_r3
-                with container:
+                with ecols6[i % 6]:
                     label = extra_mapped[fk]
                     current = mp.get(fk, "")
                     default_idx = options.index(current) if current in options else 0
-                    sel = st.selectbox(f"🔵 {label}", options, index=default_idx, key=f"m_{fk}")
+                    st.markdown(f'<div style="font-size:10px;color:#8494A7;margin-bottom:2px">🔵 {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                    sel = st.selectbox("x", options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
                     if sel == "— (unmapped)":
                         if fk in new_mp:
                             del new_mp[fk]
