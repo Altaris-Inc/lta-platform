@@ -69,19 +69,55 @@ for dk in ["_drill_show", "_drill_title", "_drill_bucket", "_drill_mp"]:
 def get_client(): return LTAClient(api_key=st.session_state.api_key)
 
 def _get_ai_suggestions(tape_id, field_key, hdrs, fk_label):
-    """Fetch AI-ranked suggestions for a field, with session state cache."""
+    """Return cached AI suggestions for a single field (populated by batch call)."""
     cache_key = f"_ai_suggest_{tape_id}_{field_key}"
-    if cache_key in st.session_state:
-        return st.session_state[cache_key]
-    try:
-        client = get_client()
-        result = client.suggest_field(tape_id, field_key)
-        suggestions = result.get("suggestions", [])
-        top5 = [s["col"] for s in suggestions[:5] if s["col"] in hdrs]
-    except Exception as e:
-        top5 = []
-    st.session_state[cache_key] = top5
-    return top5
+    return st.session_state.get(cache_key, [])
+
+
+def _fetch_all_ai_suggestions(tape_id, field_keys, hdrs):
+    """
+    Fetch AI suggestions for all fields in parallel using ThreadPoolExecutor.
+    Shows a progress bar while running. Caches results in session state.
+    """
+    from concurrent.futures import ThreadPoolExecutor, as_completed
+
+    # Filter to only fields not yet cached
+    pending = [fk for fk in field_keys
+               if f"_ai_suggest_{tape_id}_{fk}" not in st.session_state]
+
+    if not pending:
+        return  # all cached already
+
+    client = get_client()
+    progress = st.progress(0, text=f"🤖 Fetching AI suggestions for {len(pending)} fields...")
+    results = {}
+
+    def fetch_one(fk):
+        try:
+            result = client.suggest_field(tape_id, fk)
+            suggestions = result.get("suggestions", [])
+            return fk, [s["col"] for s in suggestions[:5] if s["col"] in hdrs]
+        except Exception:
+            return fk, []
+
+    completed = 0
+    with ThreadPoolExecutor(max_workers=8) as executor:
+        futures = {executor.submit(fetch_one, fk): fk for fk in pending}
+        for future in as_completed(futures):
+            fk, top5 = future.result()
+            results[fk] = top5
+            completed += 1
+            progress.progress(
+                completed / len(pending),
+                text=f"🤖 AI suggestions: {completed}/{len(pending)} fields done..."
+            )
+
+    # Cache all results
+    for fk, top5 in results.items():
+        st.session_state[f"_ai_suggest_{tape_id}_{fk}"] = top5
+
+    progress.empty()
+    st.session_state["_ai_suggest_batch_done"] = tape_id
 
 def _heuristic_top5(fk, hdrs):
     """Fast heuristic fallback for ranking candidates."""
@@ -1355,10 +1391,21 @@ elif page == "📋 Column Mapping":
         use_ai_toggle = st.toggle("🤖 AI Suggestions", value=st.session_state.get("_mapping_use_ai", False), key="_mapping_use_ai_toggle")
         if use_ai_toggle != st.session_state.get("_mapping_use_ai", False):
             st.session_state["_mapping_use_ai"] = use_ai_toggle
-            # Clear suggestion cache on toggle
-            for k in list(st.session_state.keys()):
-                if k.startswith("_ai_suggest_"):
-                    del st.session_state[k]
+            # Clear suggestion cache on toggle off
+            if not use_ai_toggle:
+                for k in list(st.session_state.keys()):
+                    if k.startswith("_ai_suggest_"):
+                        del st.session_state[k]
+                st.session_state.pop("_ai_suggest_batch_done", None)
+            st.rerun()
+
+    # Batch fetch AI suggestions when toggled on
+    use_ai = st.session_state.get("_mapping_use_ai", False)
+    if use_ai:
+        all_field_keys = list(mapped_fields.keys()) + list(unmapped_ref.keys())
+        batch_done = st.session_state.get("_ai_suggest_batch_done")
+        if batch_done != st.session_state.tape_id:
+            _fetch_all_ai_suggestions(st.session_state.tape_id, all_field_keys, hdrs)
             st.rerun()
 
     # ── Mapped Fields ──
@@ -1380,7 +1427,6 @@ elif page == "📋 Column Mapping":
                 label = mapped_fields[fk]
                 current = mp.get(fk, "")
                 icon = _tier_icon(fk)
-                use_ai = st.session_state.get("_mapping_use_ai", False)
                 smart_options = _smart_options(fk, hdrs, st.session_state.tape_id, use_ai, label)
                 default_idx = smart_options.index(current) if current in smart_options else 0
                 _cl, _cd = st.columns([1, 2])
@@ -1409,7 +1455,6 @@ elif page == "📋 Column Mapping":
             for i, fk in enumerate(unmapped_keys):
                 with ucols6[i % 3]:
                     label = unmapped_ref[fk]
-                    use_ai = st.session_state.get("_mapping_use_ai", False)
                     smart_options = _smart_options(fk, hdrs, st.session_state.tape_id, use_ai, label)
                     _cl, _cd = st.columns([1, 2])
                     with _cl:
