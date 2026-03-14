@@ -352,6 +352,12 @@ async def auto_match(
     for cf in custom:
         fields[cf.key] = {"label": cf.label, "patterns": cf.patterns}
 
+    hdrs = list(df.columns)
+
+    def _clean_mapping(mp):
+        """Remove any mapping entries where the target column is not in the tape headers."""
+        return {fk: col for fk, col in mp.items() if col in hdrs}
+
     if mode == "ai":
         from app.logic import ai_match as _ai_match
         ai_mapping = _ai_match(df, fields)
@@ -360,11 +366,11 @@ async def auto_match(
             rule_mapping = rule_match(df, fields)
             merged = dict(rule_mapping)
             merged.update(ai_mapping)
-            tape.mapping = merged
+            tape.mapping = _clean_mapping(merged)
         else:
             raise HTTPException(400, "AI matching failed. Set OPENAI_API_KEY or ANTHROPIC_API_KEY env var.")
     else:
-        tape.mapping = rule_match(df, fields)
+        tape.mapping = _clean_mapping(rule_match(df, fields))
 
     tape.analysis = analyze(df, tape.mapping)
     tape.validation = validate(df, tape.mapping)
