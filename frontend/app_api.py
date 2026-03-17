@@ -1348,7 +1348,9 @@ elif page == "🛡️ Risk Summary":
 elif page == "📋 Column Mapping":
     _tape_ac = tape.get("asset_class") if tape else None
     _ac_badge = f' <span style="background:#1E2A3A;color:#00D4AA;border:1px solid #00D4AA;font-size:11px;padding:2px 10px;border-radius:4px;font-weight:700">{ASSET_CLASS_LABELS.get(_tape_ac, _tape_ac)}</span>' if _tape_ac and _tape_ac != "other" else ""
-    st.markdown(f'<div class="section-header">Column Mapping{_ac_badge}</div>', unsafe_allow_html=True)
+    st.markdown('<div class="section-header">Column Mapping</div>', unsafe_allow_html=True)
+    if _ac_badge:
+        st.markdown(_ac_badge, unsafe_allow_html=True)
     st.markdown(f'<span style="color:#566375;font-size:11px">{len(mp)} fields mapped · {len(hdrs)} source columns</span>', unsafe_allow_html=True)
 
 
