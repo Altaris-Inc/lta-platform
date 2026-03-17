@@ -1326,7 +1326,7 @@ elif page == "🛡️ Risk Summary":
 
 elif page == "📋 Column Mapping":
     _tape_ac = tape.get("asset_class") if tape else None
-    _ac_badge = f' <span style="background:#1E3A5F;color:#00D4AA;font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600">{ASSET_CLASS_LABELS.get(_tape_ac, _tape_ac)}</span>' if _tape_ac and _tape_ac != "other" else ""
+    _ac_badge = f' <span style="background:#00D4AA;color:#0B0E11;font-size:11px;padding:2px 10px;border-radius:4px;font-weight:700">{ASSET_CLASS_LABELS.get(_tape_ac, _tape_ac)}</span>' if _tape_ac and _tape_ac != "other" else ""
     st.markdown(f'<div class="section-header">Column Mapping{_ac_badge}</div>', unsafe_allow_html=True)
     st.markdown(f'<span style="color:#566375;font-size:11px">{len(mp)} fields mapped · {len(hdrs)} source columns</span>', unsafe_allow_html=True)
 
@@ -1339,24 +1339,25 @@ elif page == "📋 Column Mapping":
 
     if templates:
         tpl_options = ["— Select template —"] + [f"{t['name']} ({t['originator']} · {len(t['mapping'])} fields)" for t in templates]
-        tc1, tc2, tc3 = st.columns([4, 1.5, 1.5])
+        tc1, tc2 = st.columns([4, 1.5])
         with tc1:
             tpl_sel = st.selectbox("Template", tpl_options, key="tpl_load", label_visibility="collapsed")
-        with tc2:
+            # Auto-apply template on selection
             if tpl_sel != "— Select template —":
                 idx = tpl_options.index(tpl_sel) - 1
                 tpl = templates[idx]
                 applicable = {k: v for k, v in tpl["mapping"].items() if v in hdrs}
-                if st.button("📥 Apply", use_container_width=True):
-                    with st.spinner("Applying..."):
-                        merged = dict(mp)
-                        merged.update(applicable)
-                        updated = client.update_mapping(st.session_state.tape_id, merged)
-                        st.session_state.tape = updated
-                        st.session_state.analysis = client.get_analysis(st.session_state.tape_id)
-                        st.session_state.validation = client.get_validation(st.session_state.tape_id)
+                prev_tpl = st.session_state.get("_last_applied_tpl")
+                if prev_tpl != tpl_sel:
+                    merged = dict(mp)
+                    merged.update(applicable)
+                    updated = client.update_mapping(st.session_state.tape_id, merged)
+                    st.session_state.tape = updated
+                    st.session_state.analysis = client.get_analysis(st.session_state.tape_id)
+                    st.session_state.validation = client.get_validation(st.session_state.tape_id)
+                    st.session_state["_last_applied_tpl"] = tpl_sel
                     st.rerun()
-        with tc3:
+        with tc2:
             if st.button("🧠 AI Match", use_container_width=True):
                 with st.spinner("AI matching..."):
                     try:
