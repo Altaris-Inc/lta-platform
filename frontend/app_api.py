@@ -13,6 +13,70 @@ import plotly.graph_objects as go
 import os
 from api_client import LTAClient
 
+# Asset class canonical fields (mirrors logic.py)
+ASSET_CLASS_FIELDS = {
+    "uk_sme": [
+        # Borrower / Obligor
+        "company_name", "company_registration", "company_type", "sic_code",
+        "region", "employee_count", "annual_turnover", "years_in_business", "sourcing_channel",
+        # Loan Economics
+        "loan_id", "loan_status", "loan_purpose", "origination_date", "maturity_date",
+        "original_balance", "current_balance", "interest_rate", "margin",
+        "original_term", "remaining_term", "upfront_fee", "currency",
+        # Credit Quality
+        "origination_rating", "current_rating", "pd_score", "lgd", "expected_loss",
+        "dpd", "dpd_bucket", "watchlist_flag", "default_flag", "default_date",
+        "net_loss", "recoveries",
+        # Security / Collateral
+        "security_type", "collateral_value", "ltv",
+        # Facility Structure
+        "facility_type", "repayment_type",
+        # Performance
+        "vintage", "months_on_book",
+        # Longitudinal
+        "reporting_date", "beginning_balance", "ending_balance",
+        "period_principal", "period_interest", "scheduled_payment",
+        "cumulative_principal_paid", "cumulative_interest_paid",
+    ],
+    "uk_consumer": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "fico_origination", "fico_current", "loan_status", "origination_date",
+        "monthly_payment", "dti", "dpd", "dpd_bucket", "loan_purpose",
+        "annual_income", "income_verification", "employment_status",
+        "vintage", "months_on_book", "net_loss", "recoveries",
+        "reporting_date", "beginning_balance", "ending_balance",
+    ],
+    "ccsf_srt": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "loan_status", "origination_date", "dpd", "dpd_bucket",
+        "pd_score", "lgd", "expected_loss", "net_loss", "recoveries",
+        "pool_id", "vintage", "months_on_book",
+        "reporting_date", "beginning_balance", "ending_balance",
+        "cumulative_principal_paid", "cumulative_interest_paid",
+    ],
+    "corporate_srt": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "loan_status", "origination_date", "original_term", "remaining_term",
+        "dpd", "pd_score", "lgd", "expected_loss", "net_loss", "recoveries",
+        "loan_purpose", "pool_id", "vintage", "months_on_book",
+        "reporting_date", "beginning_balance", "ending_balance",
+    ],
+    "other": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "loan_status", "origination_date", "monthly_payment", "dpd",
+        "vintage", "months_on_book",
+    ],
+}
+
+ASSET_CLASS_LABELS = {
+    "uk_sme": "🏭 UK SME",
+    "uk_consumer": "👤 UK Consumer",
+    "ccsf_srt": "📦 CCSF SRT",
+    "corporate_srt": "🏢 Corporate SRT",
+    "other": "📄 Other",
+}
+
+
 def _get_version():
     try:
         version_file = os.path.join(os.path.dirname(__file__), "VERSION")
@@ -1261,7 +1325,9 @@ elif page == "🛡️ Risk Summary":
 # ═══════════════════════════════════════════════════════════════
 
 elif page == "📋 Column Mapping":
-    st.markdown('<div class="section-header">Column Mapping</div>', unsafe_allow_html=True)
+    _tape_ac = tape.get("asset_class") if tape else None
+    _ac_badge = f' <span style="background:#1E3A5F;color:#00D4AA;font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600">{ASSET_CLASS_LABELS.get(_tape_ac, _tape_ac)}</span>' if _tape_ac and _tape_ac != "other" else ""
+    st.markdown(f'<div class="section-header">Column Mapping{_ac_badge}</div>', unsafe_allow_html=True)
     st.markdown(f'<span style="color:#566375;font-size:11px">{len(mp)} fields mapped · {len(hdrs)} source columns</span>', unsafe_allow_html=True)
     st.markdown('<span style="color:#566375;font-size:10px">🔴 Canonical · 🟠 Extended · 🟢 Optional · 🔵 Longitudinal</span>', unsafe_allow_html=True)
 
@@ -1342,12 +1408,22 @@ elif page == "📋 Column Mapping":
                 tidx = tpl_opts.index(tpl_sel_val) - 1
                 selected_tpl = templates[tidx]
 
+    # Get tape asset class
+    tape_asset_class = tape.get("asset_class") if tape else None
+
     if selected_tpl:
         # Template mode: reference fields = template's fields
         ref_fields = {}
         for k, v in selected_tpl["mapping"].items():
             ref_fields[k] = all_flds.get(k, k)
         ref_label = f"Template: {selected_tpl['name']}"
+        total_ref = len(ref_fields)
+    elif tape_asset_class and tape_asset_class in ASSET_CLASS_FIELDS and tape_asset_class != "other":
+        # Asset class mode: only show canonical fields for this asset class
+        ac_keys = ASSET_CLASS_FIELDS[tape_asset_class]
+        ref_fields = {k: all_flds.get(k, k) for k in ac_keys if k in all_flds}
+        ac_label = ASSET_CLASS_LABELS.get(tape_asset_class, tape_asset_class)
+        ref_label = f"{ac_label} Canonical Fields"
         total_ref = len(ref_fields)
     else:
         # Standard mode: reference fields = all standard + custom fields

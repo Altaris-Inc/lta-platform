@@ -71,6 +71,30 @@ OPTIONAL_FIELDS = {
     "servicer":             {"label": "Servicer",       "patterns": [r"servicer"]},
     "investor":             {"label": "Investor",       "patterns": [r"investor"]},
     "autopay":              {"label": "Autopay",        "patterns": [r"auto.?pay"]},
+
+    # ── SME / Commercial fields ──
+    "company_type":             {"label": "Co Type",        "patterns": [r"company.?type", r"entity.?type", r"business.?type", r"legal.?form"]},
+    "company_name":             {"label": "Co Name",        "patterns": [r"company.?name", r"entity.?name", r"business.?name", r"obligor.?name"]},
+    "company_registration":     {"label": "Co Reg No",      "patterns": [r"company.?reg", r"registration.?num", r"companies.?house", r"crn"]},
+    "sic_code":                 {"label": "SIC Code",       "patterns": [r"sic.?code", r"sic$", r"industry.?code", r"nace"]},
+    "region":                   {"label": "Region",          "patterns": [r"region", r"county", r"territory"]},
+    "employee_count":           {"label": "Employees",      "patterns": [r"employ.?count", r"num.?employ", r"headcount", r"employee.?num"]},
+    "annual_turnover":          {"label": "Turnover",        "patterns": [r"annual.?turn", r"turnover", r"revenue", r"annual.?rev"]},
+    "years_in_business":        {"label": "Yrs In Biz",     "patterns": [r"year.?in.?bus", r"time.?in.?bus", r"bus.?age", r"trading.?hist"]},
+    "sourcing_channel":         {"label": "Src Channel",    "patterns": [r"sourc.?channel", r"referral", r"introducer", r"broker"]},
+    "margin":                   {"label": "Margin",          "patterns": [r"^margin$", r"credit.?margin", r"spread", r"margin.?rate"]},
+    "upfront_fee":              {"label": "Upfront Fee",    "patterns": [r"upfront.?fee", r"arrangement.?fee", r"facility.?fee"]},
+    "origination_rating":       {"label": "Orig Rating",    "patterns": [r"orig.?rating", r"orig.?internal.?rat", r"initial.?rating", r"rating.?at.?orig"]},
+    "current_rating":           {"label": "Curr Rating",    "patterns": [r"curr.?rating", r"latest.?rating", r"current.?internal.?rat", r"rating.?current"]},
+    "watchlist_flag":           {"label": "Watchlist",      "patterns": [r"watchlist", r"watch.?list", r"watch.?flag"]},
+    "default_flag":             {"label": "Default Flag",   "patterns": [r"default.?flag", r"is.?default", r"defaulted"]},
+    "default_date":             {"label": "Default Date",   "patterns": [r"default.?date", r"date.?of.?default", r"event.?default"]},
+    "security_type":            {"label": "Security",        "patterns": [r"security.?type", r"collateral.?type", r"security.?desc"]},
+    "collateral_value":         {"label": "Collateral Val", "patterns": [r"collateral.?val", r"security.?val", r"collateral.?amount"]},
+    "ltv":                      {"label": "LTV",             "patterns": [r"^ltv$", r"loan.?to.?val", r"ltv.?ratio"]},
+    "facility_type":            {"label": "Facility Type",  "patterns": [r"facility.?type", r"loan.?type", r"product.?type"]},
+    "repayment_type":           {"label": "Repmt Type",     "patterns": [r"repay.?type", r"repayment.?struct", r"amort.?type"]},
+    "currency":                 {"label": "Currency",        "patterns": [r"currency", r"ccy", r"^curr$"]},
 }
 
 # Longitudinal fields — for time-series tapes with multiple rows per loan
@@ -98,6 +122,110 @@ for k in CANONICAL_FIELDS: FIELD_TIERS[k] = "canonical"
 for k in EXTENDED_FIELDS:  FIELD_TIERS[k] = "extended"
 for k in OPTIONAL_FIELDS:  FIELD_TIERS[k] = "optional"
 for k in LONGITUDINAL_FIELDS: FIELD_TIERS[k] = "longitudinal"
+
+
+# ═══════════════════════════════════════════════════════════════
+# ASSET CLASS DEFINITIONS
+# ═══════════════════════════════════════════════════════════════
+
+ASSET_CLASSES = {
+    "uk_sme": "UK SME",
+    "uk_consumer": "UK Consumer",
+    "ccsf_srt": "CCSF SRT",
+    "corporate_srt": "Corporate SRT",
+    "other": "Other",
+}
+
+# Canonical fields per asset class — ordered by priority
+# These are the fields that MUST be mapped for meaningful analysis
+ASSET_CLASS_FIELDS = {
+    "uk_sme": [
+        # Borrower / Obligor
+        "company_name",
+        "company_registration",
+        "company_type",
+        "sic_code",
+        "region",
+        "employee_count",
+        "annual_turnover",
+        "years_in_business",
+        "sourcing_channel",
+        # Loan Economics
+        "loan_id",
+        "loan_status",
+        "loan_purpose",
+        "origination_date",
+        "maturity_date",
+        "original_balance",
+        "current_balance",
+        "interest_rate",
+        "margin",
+        "original_term",
+        "remaining_term",
+        "upfront_fee",
+        "currency",
+        # Credit Quality
+        "origination_rating",
+        "current_rating",
+        "pd_score",
+        "lgd",
+        "expected_loss",
+        "dpd",
+        "dpd_bucket",
+        "watchlist_flag",
+        "default_flag",
+        "default_date",
+        "net_loss",
+        "recoveries",
+        # Security / Collateral
+        "security_type",
+        "collateral_value",
+        "ltv",
+        # Facility Structure
+        "facility_type",
+        "repayment_type",
+        # Performance
+        "vintage",
+        "months_on_book",
+        # Longitudinal
+        "reporting_date",
+        "beginning_balance",
+        "ending_balance",
+        "period_principal",
+        "period_interest",
+        "scheduled_payment",
+        "cumulative_principal_paid",
+        "cumulative_interest_paid",
+    ],
+    "uk_consumer": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "fico_origination", "fico_current", "loan_status", "origination_date",
+        "monthly_payment", "dti", "dpd", "dpd_bucket", "loan_purpose",
+        "annual_income", "income_verification", "employment_status",
+        "vintage", "months_on_book", "net_loss", "recoveries",
+        "reporting_date", "beginning_balance", "ending_balance",
+    ],
+    "ccsf_srt": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "loan_status", "origination_date", "dpd", "dpd_bucket",
+        "pd_score", "lgd", "expected_loss", "net_loss", "recoveries",
+        "pool_id", "vintage", "months_on_book",
+        "reporting_date", "beginning_balance", "ending_balance",
+        "cumulative_principal_paid", "cumulative_interest_paid",
+    ],
+    "corporate_srt": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "loan_status", "origination_date", "original_term", "remaining_term",
+        "dpd", "pd_score", "lgd", "expected_loss", "net_loss", "recoveries",
+        "loan_purpose", "pool_id", "vintage", "months_on_book",
+        "reporting_date", "beginning_balance", "ending_balance",
+    ],
+    "other": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "loan_status", "origination_date", "monthly_payment", "dpd",
+        "vintage", "months_on_book",
+    ],
+}
 
 
 # ═══════════════════════════════════════════════════════════════

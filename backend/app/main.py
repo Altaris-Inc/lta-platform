@@ -27,6 +27,7 @@ from app.logic import (
     detect_tape_type, process_longitudinal,
     parse_numeric, calc_regression, calc_multi_regression,
     ai_rank_candidates,
+    ASSET_CLASSES, ASSET_CLASS_FIELDS,
 )
 
 
@@ -184,6 +185,7 @@ def _read_tape(content: bytes, filename: str = "") -> pd.DataFrame:
 
 async def upload_tape(
     file: UploadFile = File(...),
+    asset_class: str = Query(None, description="Asset class key e.g. uk_sme, uk_consumer"),
     db: AsyncSession = Depends(get_db),
     user: User = Depends(get_current_user),
 ):
@@ -217,6 +219,18 @@ async def upload_tape(
             fields[cf.key] = {"label": cf.label, "patterns": cf.patterns}
         mapping = rule_match(df, fields)
 
+    # Clean mapping — remove entries pointing to non-existent columns
+    mapping = {fk: col for fk, col in mapping.items() if col in hdrs}
+
+    # Apply asset class canonical field prioritization
+    if asset_class and asset_class in ASSET_CLASS_FIELDS:
+        canonical_keys = ASSET_CLASS_FIELDS[asset_class]
+        ac_fields = {k: STD_FIELDS[k] for k in canonical_keys if k in STD_FIELDS}
+        ac_mapping = rule_match(df, ac_fields)
+        for fk, col in ac_mapping.items():
+            if fk not in mapping and col in hdrs:
+                mapping[fk] = col
+
     # Detect tape type
     tape_info = detect_tape_type(df, mapping)
     analysis_df = df
@@ -248,6 +262,7 @@ async def upload_tape(
         headers=list(tape_df_to_save.columns),  # includes derived columns
         mapping=mapping,
         analysis=an, validation=vl,
+        asset_class=asset_class or "other",
     )
     db.add(tape)
     await db.commit()
@@ -352,12 +367,6 @@ async def auto_match(
     for cf in custom:
         fields[cf.key] = {"label": cf.label, "patterns": cf.patterns}
 
-    hdrs = list(df.columns)
-
-    def _clean_mapping(mp):
-        """Remove any mapping entries where the target column is not in the tape headers."""
-        return {fk: col for fk, col in mp.items() if col in hdrs}
-
     if mode == "ai":
         from app.logic import ai_match as _ai_match
         ai_mapping = _ai_match(df, fields)
@@ -366,11 +375,11 @@ async def auto_match(
             rule_mapping = rule_match(df, fields)
             merged = dict(rule_mapping)
             merged.update(ai_mapping)
-            tape.mapping = _clean_mapping(merged)
+            tape.mapping = merged
         else:
             raise HTTPException(400, "AI matching failed. Set OPENAI_API_KEY or ANTHROPIC_API_KEY env var.")
     else:
-        tape.mapping = _clean_mapping(rule_match(df, fields))
+        tape.mapping = rule_match(df, fields)
 
     tape.analysis = analyze(df, tape.mapping)
     tape.validation = validate(df, tape.mapping)
@@ -616,4 +625,14 @@ async def suggest_field_mapping(
     return {
         "field_key": field_key,
         "suggestions": [{"col": col, "score": score} for score, col in ranked if score > 0]
+    }
+
+
+@app.get("/api/asset-classes", tags=["System"])
+async def list_asset_classes():
+    """Return available asset classes with their canonical field lists."""
+    return {
+        "asset_classes": [
+            {"key": k, "label": v} for k, v in ASSET_CLASSES.items()
+        ]
     }

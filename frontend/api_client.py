@@ -79,8 +79,12 @@ class LTAClient:
         return self._request("POST", "/api/users", json_data={"name": name, "email": email})
 
     # ── Tapes ──
-    def upload_tape(self, filename: str, csv_bytes: bytes) -> dict:
-        return self._upload("/api/tapes", filename, csv_bytes)
+    def upload_tape(self, filename: str, csv_bytes: bytes, asset_class: str = None) -> dict:
+        params = {"asset_class": asset_class} if asset_class else None
+        return self._upload("/api/tapes", filename, csv_bytes, params=params)
+
+    def list_asset_classes(self) -> dict:
+        return self._request("GET", "/api/asset-classes")
 
     def list_tapes(self) -> list:
         return self._request("GET", "/api/tapes")

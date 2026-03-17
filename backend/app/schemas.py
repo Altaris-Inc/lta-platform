@@ -26,6 +26,7 @@ class TapeOut(BaseModel):
     col_count: int
     headers: list[str]
     mapping: dict
+    asset_class: Optional[str] = None
     created_at: datetime
     model_config = {"from_attributes": True}
 

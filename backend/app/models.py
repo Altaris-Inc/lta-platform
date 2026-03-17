@@ -40,6 +40,7 @@ class Tape(Base):
     mapping = Column(JSON, default=dict)           # {field_key: col_name}
     analysis = Column(JSON, nullable=True)         # cached analysis results
     validation = Column(JSON, nullable=True)       # cached validation results
+    asset_class = Column(String(50), nullable=True)  # e.g. uk_sme, uk_consumer
     created_at = Column(DateTime(timezone=True), default=utcnow)
     updated_at = Column(DateTime(timezone=True), default=utcnow, onupdate=utcnow)
 
