@@ -117,6 +117,19 @@ for k, v in DEFAULTS.items():
     if k not in st.session_state:
         st.session_state[k] = v
 
+# Restore API key from URL query params on page refresh
+_params = st.query_params
+if not st.session_state.get("api_key") and "api_key" in _params:
+    try:
+        LTAClient(api_key=_params["api_key"]).list_tapes()
+        st.session_state.api_key = _params["api_key"]
+    except:
+        pass
+
+# Keep query param in sync when logged in
+if st.session_state.get("api_key"):
+    st.query_params["api_key"] = st.session_state.api_key
+
 # Drill-down state
 for dk in ["_drill_show", "_drill_title", "_drill_bucket", "_drill_mp"]:
     if dk not in st.session_state:
