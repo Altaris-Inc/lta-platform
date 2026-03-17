@@ -69,11 +69,11 @@ ASSET_CLASS_FIELDS = {
 }
 
 ASSET_CLASS_LABELS = {
-    "uk_sme": "🏭 UK SME",
-    "uk_consumer": "👤 UK Consumer",
-    "ccsf_srt": "📦 CCSF SRT",
-    "corporate_srt": "🏢 Corporate SRT",
-    "other": "📄 Other",
+    "uk_sme": "UK SME",
+    "uk_consumer": "UK Consumer",
+    "ccsf_srt": "CCSF SRT",
+    "corporate_srt": "Corporate SRT",
+    "other": "Other",
 }
 
 
@@ -572,6 +572,25 @@ if not st.session_state.tape_id:
         st.markdown('<p style="text-align:center;color:#8494A7;font-size:13px">Upload a CSV loan tape to begin analysis</p>', unsafe_allow_html=True)
         st.markdown("<br>", unsafe_allow_html=True)
 
+        # Asset class selector
+        ASSET_CLASS_OPTIONS = {
+            "": "— Select asset class (optional) —",
+            "uk_sme": "UK SME",
+            "uk_consumer": "UK Consumer",
+            "ccsf_srt": "CCSF SRT",
+            "corporate_srt": "Corporate SRT",
+            "other": "Other",
+        }
+        selected_ac = st.selectbox(
+            "Asset Class",
+            options=list(ASSET_CLASS_OPTIONS.keys()),
+            format_func=lambda x: ASSET_CLASS_OPTIONS[x],
+            key="upload_asset_class",
+            label_visibility="collapsed",
+        )
+        if selected_ac:
+            st.session_state["_asset_class"] = selected_ac
+
         uploaded_files = st.file_uploader("Upload CSV", type=["csv","tsv","xlsx","xls"],
                                          label_visibility="collapsed", accept_multiple_files=True)
         if uploaded_files:
@@ -599,7 +618,8 @@ if not st.session_state.tape_id:
                     uploaded.seek(0)
                     last_df = pd.read_csv(uploaded)
                     name = uploaded.name
-                tape = client.upload_tape(name, csv_bytes)
+                _ac = st.session_state.get("_asset_class") or None
+                tape = client.upload_tape(name, csv_bytes, asset_class=_ac)
                 # Auto-run rule-based match
                 try:
                     tape = client.auto_match(tape["id"], mode="rule")
@@ -627,7 +647,8 @@ if not st.session_state.tape_id:
                     if os.path.exists(path):
                         with open(path, "rb") as f: csv_bytes = f.read()
                         with st.spinner("Uploading & analyzing..."):
-                            tape = client.upload_tape(name, csv_bytes)
+                            _ac = st.session_state.get("_asset_class") or None
+                            tape = client.upload_tape(name, csv_bytes, asset_class=_ac)
                             st.session_state.tape_id = tape["id"]
                             st.session_state.tape = tape
                             st.session_state.filename = tape["filename"]
@@ -1326,7 +1347,7 @@ elif page == "🛡️ Risk Summary":
 
 elif page == "📋 Column Mapping":
     _tape_ac = tape.get("asset_class") if tape else None
-    _ac_badge = f' <span style="background:#00D4AA;color:#0B0E11;font-size:11px;padding:2px 10px;border-radius:4px;font-weight:700">{ASSET_CLASS_LABELS.get(_tape_ac, _tape_ac)}</span>' if _tape_ac and _tape_ac != "other" else ""
+    _ac_badge = f' <span style="background:#1E2A3A;color:#00D4AA;border:1px solid #00D4AA;font-size:11px;padding:2px 10px;border-radius:4px;font-weight:700">{ASSET_CLASS_LABELS.get(_tape_ac, _tape_ac)}</span>' if _tape_ac and _tape_ac != "other" else ""
     st.markdown(f'<div class="section-header">Column Mapping{_ac_badge}</div>', unsafe_allow_html=True)
     st.markdown(f'<span style="color:#566375;font-size:11px">{len(mp)} fields mapped · {len(hdrs)} source columns</span>', unsafe_allow_html=True)
 
