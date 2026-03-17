@@ -209,6 +209,11 @@ async def upload_tape(
 
     if best_tpl and best_score >= 0.8:
         mapping = {k: v for k, v in best_tpl.mapping.items() if v in hdrs}
+    elif asset_class and asset_class in ASSET_CLASS_FIELDS:
+        # Asset class selected — match ONLY against canonical fields for that class
+        canonical_keys = ASSET_CLASS_FIELDS[asset_class]
+        ac_fields = {k: STD_FIELDS[k] for k in canonical_keys if k in STD_FIELDS}
+        mapping = rule_match(df, ac_fields)
     else:
         cf_result = await db.execute(
             select(CustomField).where(CustomField.user_id == user.id)
@@ -221,15 +226,6 @@ async def upload_tape(
 
     # Clean mapping — remove entries pointing to non-existent columns
     mapping = {fk: col for fk, col in mapping.items() if col in hdrs}
-
-    # Apply asset class canonical field prioritization
-    if asset_class and asset_class in ASSET_CLASS_FIELDS:
-        canonical_keys = ASSET_CLASS_FIELDS[asset_class]
-        ac_fields = {k: STD_FIELDS[k] for k in canonical_keys if k in STD_FIELDS}
-        ac_mapping = rule_match(df, ac_fields)
-        for fk, col in ac_mapping.items():
-            if fk not in mapping and col in hdrs:
-                mapping[fk] = col
 
     # Detect tape type
     tape_info = detect_tape_type(df, mapping)
