@@ -1329,7 +1329,7 @@ elif page == "📋 Column Mapping":
     _ac_badge = f' <span style="background:#1E3A5F;color:#00D4AA;font-size:11px;padding:2px 8px;border-radius:4px;font-weight:600">{ASSET_CLASS_LABELS.get(_tape_ac, _tape_ac)}</span>' if _tape_ac and _tape_ac != "other" else ""
     st.markdown(f'<div class="section-header">Column Mapping{_ac_badge}</div>', unsafe_allow_html=True)
     st.markdown(f'<span style="color:#566375;font-size:11px">{len(mp)} fields mapped · {len(hdrs)} source columns</span>', unsafe_allow_html=True)
-    st.markdown('<span style="color:#566375;font-size:10px">🔴 Canonical · 🟠 Extended · 🟢 Optional · 🔵 Longitudinal</span>', unsafe_allow_html=True)
+
 
     # ── Templates + Actions in one row ──
     try:
@@ -1492,11 +1492,7 @@ elif page == "📋 Column Mapping":
 
         # Tier badge helper
         def _tier_icon(fk):
-            tier = std_fields.get(fk, {}).get("tier", "")
-            if tier == "canonical": return "🔴"
-            if tier == "extended": return "🟠"
-            if tier == "longitudinal": return "🔵"
-            return "🟢"
+            return ""
 
         for i, fk in enumerate(mapped_keys):
             with cols3[i % 3]:
@@ -1507,7 +1503,7 @@ elif page == "📋 Column Mapping":
                 default_idx = smart_options.index(current) if current in smart_options else 0
                 _cl, _cd = st.columns([1, 2])
                 with _cl:
-                    st.markdown(f'<div style="font-size:12px;color:#E8ECF1;font-weight:600;padding-top:8px;line-height:1.2">{icon} {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                    st.markdown(f'<div style="font-size:12px;color:#E8ECF1;font-weight:600;padding-top:8px;line-height:1.2">{_strip_currency(label)}</div>', unsafe_allow_html=True)
                 with _cd:
                     sel = st.selectbox("x", smart_options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
                 if sel == "— (unmapped)" or sel == "─────────────":
@@ -1553,7 +1549,7 @@ elif page == "📋 Column Mapping":
                     default_idx = options.index(current) if current in options else 0
                     _cl, _cd = st.columns([1, 2])
                     with _cl:
-                        st.markdown(f'<div style="font-size:12px;color:#E8ECF1;font-weight:600;padding-top:8px;line-height:1.2">🔵 {_strip_currency(label)}</div>', unsafe_allow_html=True)
+                        st.markdown(f'<div style="font-size:12px;color:#E8ECF1;font-weight:600;padding-top:8px;line-height:1.2">{_strip_currency(label)}</div>', unsafe_allow_html=True)
                     with _cd:
                         sel = st.selectbox("x", options, index=default_idx, key=f"m_{fk}", label_visibility="collapsed")
                     if sel == "— (unmapped)":
