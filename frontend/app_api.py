@@ -16,27 +16,19 @@ from api_client import LTAClient
 # Asset class canonical fields (mirrors logic.py)
 ASSET_CLASS_FIELDS = {
     "uk_sme": [
-        # Borrower / Obligor
-        "company_name", "company_registration", "company_type", "sic_code",
+        # Borrower / Obligor (10)
+        "loan_id", "company_name", "company_registration", "company_type", "sic_code",
         "region", "employee_count", "annual_turnover", "years_in_business", "sourcing_channel",
-        # Loan Economics
-        "loan_id", "loan_status", "loan_purpose", "origination_date", "maturity_date",
-        "original_balance", "current_balance", "interest_rate", "margin",
-        "original_term", "remaining_term", "upfront_fee", "currency",
-        # Credit Quality
-        "origination_rating", "current_rating", "pd_score", "lgd", "expected_loss",
-        "dpd", "dpd_bucket", "watchlist_flag", "default_flag", "default_date",
-        "net_loss", "recoveries",
-        # Security / Collateral
+        # Loan Economics (10)
+        "current_balance", "original_balance", "interest_rate", "margin", "upfront_fee",
+        "origination_date", "maturity_date", "remaining_term", "loan_purpose", "currency",
+        # Credit Quality (8)
+        "origination_rating", "current_rating", "pd_score", "lgd",
+        "dpd", "watchlist_flag", "default_flag", "default_date",
+        # Security / Collateral (3)
         "security_type", "collateral_value", "ltv",
-        # Facility Structure
-        "facility_type", "repayment_type",
-        # Performance
-        "vintage", "months_on_book",
-        # Longitudinal
-        "reporting_date", "beginning_balance", "ending_balance",
-        "period_principal", "period_interest", "scheduled_payment",
-        "cumulative_principal_paid", "cumulative_interest_paid",
+        # Facility Structure (3)
+        "facility_type", "repayment_type", "loan_status",
     ],
     "uk_consumer": [
         "loan_id", "current_balance", "original_balance", "interest_rate",
