@@ -1551,6 +1551,7 @@ elif page == "📋 Column Mapping":
     if use_ai:
         all_field_keys = list(mapped_fields.keys()) + list(unmapped_ref.keys())
         batch_done = st.session_state.get("_ai_suggest_batch_done")
+        st.write(f"DEBUG: use_ai={use_ai}, batch_done={batch_done}, tape_id={st.session_state.tape_id}, will_fetch={batch_done != st.session_state.tape_id}")
         if batch_done != st.session_state.tape_id:
             _fetch_all_ai_suggestions(st.session_state.tape_id, all_field_keys, hdrs)
             st.session_state["_ai_suggest_batch_done"] = st.session_state.tape_id
