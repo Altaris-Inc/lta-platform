@@ -164,8 +164,6 @@ def _fetch_all_ai_suggestions(tape_id, field_keys, hdrs):
         return  # all cached already
 
     client = get_client()
-    progress = st.progress(0, text=f"🤖 Fetching AI suggestions for {len(pending)} fields...")
-    results = {}
 
     def fetch_one(fk):
         try:
@@ -175,23 +173,13 @@ def _fetch_all_ai_suggestions(tape_id, field_keys, hdrs):
         except Exception:
             return fk, []
 
-    completed = 0
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(fetch_one, fk): fk for fk in pending}
-        for future in as_completed(futures):
-            fk, top5 = future.result()
-            results[fk] = top5
-            completed += 1
-            progress.progress(
-                completed / len(pending),
-                text=f"🤖 AI suggestions: {completed}/{len(pending)} fields done..."
-            )
+    with st.spinner(f"🤖 Fetching AI suggestions for {len(pending)} fields..."):
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(fetch_one, fk): fk for fk in pending}
+            for future in as_completed(futures):
+                fk, top5 = future.result()
+                st.session_state[f"_ai_suggest_{tape_id}_{fk}"] = top5
 
-    # Cache all results
-    for fk, top5 in results.items():
-        st.session_state[f"_ai_suggest_{tape_id}_{fk}"] = top5
-
-    progress.empty()
     st.session_state["_ai_suggest_batch_done"] = tape_id
 
 def _heuristic_top5(fk, hdrs):
@@ -1550,24 +1538,22 @@ elif page == "📋 Column Mapping":
         st.markdown(f'<span style="color:#8494A7;font-size:11px">{ref_label} · {len(mapped_fields)}/{total_ref} mapped</span>', unsafe_allow_html=True)  # noqa: E501
 
     with _tog_col:
-        use_ai_toggle = st.toggle("🤖 AI Suggestions", value=st.session_state.get("_mapping_use_ai", False), key="_mapping_use_ai_toggle")  # noqa: E501
+        use_ai_toggle = st.toggle("🤖 AI Suggestions", key="_mapping_use_ai")  # noqa: E501
 
-        if use_ai_toggle != st.session_state.get("_mapping_use_ai", False):
-            st.session_state["_mapping_use_ai"] = use_ai_toggle
-            # Clear suggestion cache on toggle off
-            if not use_ai_toggle:
-                for k in list(st.session_state.keys()):
-                    if k.startswith("_ai_suggest_"):
-                        del st.session_state[k]
-                st.session_state.pop("_ai_suggest_batch_done", None)
+    # Clear cache when toggled off
+    if not use_ai_toggle:
+        for k in list(st.session_state.keys()):
+            if k.startswith("_ai_suggest_"):
+                del st.session_state[k]
+        st.session_state.pop("_ai_suggest_batch_done", None)
 
     # Batch fetch AI suggestions when toggled on
-    use_ai = st.session_state.get("_mapping_use_ai", False)
-    if use_ai:
+    if use_ai_toggle:
         all_field_keys = list(mapped_fields.keys()) + list(unmapped_ref.keys())
         batch_done = st.session_state.get("_ai_suggest_batch_done")
         if batch_done != st.session_state.tape_id:
             _fetch_all_ai_suggestions(st.session_state.tape_id, all_field_keys, hdrs)
+            st.session_state["_ai_suggest_batch_done"] = st.session_state.tape_id
 
     # ── Mapped Fields ──
     if mapped_fields:
