@@ -141,7 +141,9 @@ for dk in ["_drill_show", "_drill_title", "_drill_bucket", "_drill_mp"]:
     if dk not in st.session_state:
         st.session_state[dk] = None if dk != "_drill_show" else False
 
+
 def get_client(): return LTAClient(api_key=st.session_state.api_key)
+
 
 def _get_ai_suggestions(tape_id, field_key, hdrs, fk_label):
     """Return cached AI suggestions for a single field (populated by batch call)."""
@@ -174,14 +176,23 @@ def _fetch_all_ai_suggestions(tape_id, field_keys, hdrs):
             print(f"ERROR for {fk}: {e}")
             return fk, []
 
-    with st.spinner(f"🤖 Fetching AI suggestions for {len(pending)} fields..."):
-        with ThreadPoolExecutor(max_workers=3) as executor:
-            futures = {executor.submit(fetch_one, fk): fk for fk in pending}
-            for future in as_completed(futures):
-                fk, top5 = future.result()
-                st.session_state[f"_ai_suggest_{tape_id}_{fk}"] = top5
+    total = len(pending)
+    completed = 0
+    progress = st.progress(0, text=f"🤖 AI suggestions: 0/{total} fields done...")
+    with ThreadPoolExecutor(max_workers=3) as executor:
+        futures = {executor.submit(fetch_one, fk): fk for fk in pending}
+        for future in as_completed(futures):
+            fk, top5 = future.result()
+            st.session_state[f"_ai_suggest_{tape_id}_{fk}"] = top5
+            completed += 1
+            progress.progress(
+                completed / total,
+                text=f"🤖 AI suggestions: {completed}/{total} fields done..."
+            )
 
+    progress.empty()
     st.session_state["_ai_suggest_batch_done"] = tape_id
+
 
 def _heuristic_top5(fk, hdrs):
     """Fast heuristic fallback for ranking candidates."""
@@ -196,6 +207,7 @@ def _heuristic_top5(fk, hdrs):
         scored.append((score, h))
     scored.sort(key=lambda x: -x[0])
     return [h for s, h in scored[:5] if s > 0]
+
 
 def _smart_options(fk, hdrs, tape_id=None, use_ai=False, label=""):
     """Build dropdown options: top 5 (AI or heuristic) then divider then rest."""
@@ -218,6 +230,8 @@ def _smart_options(fk, hdrs, tape_id=None, use_ai=False, label=""):
 # ═══════════════════════════════════════════════════════════════
 
 @st.dialog("Drill Down", width="large")
+
+
 def drill_down_dialog():
     """Modal popup showing filtered loans for a bucket — matches React version."""
     from logic import parse_numeric
@@ -308,6 +322,7 @@ def drill_down_dialog():
 # HELPERS
 # ═══════════════════════════════════════════════════════════════
 
+
 def fmt_c(v):
     if v is None: return "—"
     if abs(v) >= 1e9: return f"${v/1e9:.2f}B"
@@ -315,9 +330,15 @@ def fmt_c(v):
     if abs(v) >= 1e3: return f"${v/1e3:.1f}K"
     return f"${v:,.0f}"
 
+
 def fmt_p(v): return f"{(v or 0):.1f}%"
+
+
 def fmt_r(v): return f"{(v or 0):.2f}%"
+
+
 def fmt_s(v): return str(round(v or 0))
+
 
 def card(label, value, sub=""):
     st.markdown(f'<div class="metric-card"><div class="metric-label">{label}</div><div class="metric-value">{value}</div><div class="metric-sub">{sub}</div></div>', unsafe_allow_html=True)  # noqa: E501
@@ -335,6 +356,7 @@ def chart(data, title, color="#00D4AA", key=None):
         yaxis=dict(title="", autorange="reversed"), margin=dict(l=10,r=10,t=40,b=20), showlegend=False)
     st.plotly_chart(fig, use_container_width=True, key=key)
 
+
 def chart_clickable(data, title, color="#00D4AA", key=None):
     """Just render chart - no click handling."""
     if not data or all(d.get("count",0)==0 for d in data): return
@@ -346,6 +368,7 @@ def chart_clickable(data, title, color="#00D4AA", key=None):
         xaxis=dict(title="% Balance", showgrid=True, gridcolor="#1E2530"),
         yaxis=dict(title="", autorange="reversed"), margin=dict(l=10,r=10,t=40,b=20), showlegend=False)
     st.plotly_chart(fig, use_container_width=True, key=key)
+
 
 def table(data):
     if not data: return pd.DataFrame()
@@ -1982,3 +2005,4 @@ curl http://127.0.0.1:8000/api/tapes/{{tape_id}}/analysis \\
 
 # Full API docs: http://127.0.0.1:8000/docs
 """, language="bash")
+
