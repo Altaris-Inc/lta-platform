@@ -152,20 +152,13 @@ def _get_ai_suggestions(tape_id, field_key, hdrs, fk_label):
 def _fetch_all_ai_suggestions(tape_id, field_keys, hdrs):
     """
     Fetch AI suggestions for all fields in parallel using ThreadPoolExecutor.
-    Shows a spinner while running. Caches results in session state.
+    Shows a progress bar while running. Caches results in session state.
     """
     from concurrent.futures import ThreadPoolExecutor, as_completed
 
     # Filter to only fields not yet cached
     pending = [fk for fk in field_keys
                if f"_ai_suggest_{tape_id}_{fk}" not in st.session_state]
-
-    print(f"FETCH DEBUG: tape_id={tape_id}, field_keys={len(field_keys)}, pending={len(pending)}")
-    cached = [fk for fk in field_keys if f"_ai_suggest_{tape_id}_{fk}" in st.session_state]
-    if cached:
-        print(f"FETCH DEBUG: sample cached key = _ai_suggest_{tape_id}_{cached[0]}, value = {st.session_state[f'_ai_suggest_{tape_id}_{cached[0]}']}")
-    else:
-        print(f"FETCH DEBUG: no cached keys found for this tape_id")
 
     if not pending:
         return  # all cached already
@@ -182,7 +175,7 @@ def _fetch_all_ai_suggestions(tape_id, field_keys, hdrs):
             return fk, []
 
     with st.spinner(f"🤖 Fetching AI suggestions for {len(pending)} fields..."):
-        with ThreadPoolExecutor(max_workers=8) as executor:
+        with ThreadPoolExecutor(max_workers=3) as executor:
             futures = {executor.submit(fetch_one, fk): fk for fk in pending}
             for future in as_completed(futures):
                 fk, top5 = future.result()
@@ -1559,7 +1552,6 @@ elif page == "📋 Column Mapping":
     if use_ai:
         all_field_keys = list(mapped_fields.keys()) + list(unmapped_ref.keys())
         batch_done = st.session_state.get("_ai_suggest_batch_done")
-        st.write(f"DEBUG: use_ai={use_ai}, batch_done={batch_done}, tape_id={st.session_state.tape_id}, will_fetch={batch_done != st.session_state.tape_id}")
         if batch_done != st.session_state.tape_id:
             _fetch_all_ai_suggestions(st.session_state.tape_id, all_field_keys, hdrs)
             st.session_state["_ai_suggest_batch_done"] = st.session_state.tape_id
