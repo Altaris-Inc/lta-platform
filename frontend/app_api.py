@@ -1538,17 +1538,17 @@ elif page == "📋 Column Mapping":
         st.markdown(f'<span style="color:#8494A7;font-size:11px">{ref_label} · {len(mapped_fields)}/{total_ref} mapped</span>', unsafe_allow_html=True)  # noqa: E501
 
     with _tog_col:
-        use_ai_toggle = st.toggle("🤖 AI Suggestions", key="_mapping_use_ai")  # noqa: E501
+        use_ai = st.toggle("🤖 AI Suggestions", key="_mapping_use_ai")  # noqa: E501
 
     # Clear cache when toggled off
-    if not use_ai_toggle:
+    if not use_ai:
         for k in list(st.session_state.keys()):
             if k.startswith("_ai_suggest_"):
                 del st.session_state[k]
         st.session_state.pop("_ai_suggest_batch_done", None)
 
     # Batch fetch AI suggestions when toggled on
-    if use_ai_toggle:
+    if use_ai:
         all_field_keys = list(mapped_fields.keys()) + list(unmapped_ref.keys())
         batch_done = st.session_state.get("_ai_suggest_batch_done")
         if batch_done != st.session_state.tape_id:
