@@ -164,8 +164,6 @@ def _fetch_all_ai_suggestions(tape_id, field_keys, hdrs):
         return  # all cached already
 
     client = get_client()
-    progress = st.progress(0, text=f"🤖 Fetching AI suggestions for {len(pending)} fields...")
-    results = {}
 
     def fetch_one(fk):
         try:
@@ -175,23 +173,13 @@ def _fetch_all_ai_suggestions(tape_id, field_keys, hdrs):
         except Exception:
             return fk, []
 
-    completed = 0
-    with ThreadPoolExecutor(max_workers=8) as executor:
-        futures = {executor.submit(fetch_one, fk): fk for fk in pending}
-        for future in as_completed(futures):
-            fk, top5 = future.result()
-            results[fk] = top5
-            completed += 1
-            progress.progress(
-                completed / len(pending),
-                text=f"🤖 AI suggestions: {completed}/{len(pending)} fields done..."
-            )
+    with st.spinner(f"🤖 Fetching AI suggestions for {len(pending)} fields..."):
+        with ThreadPoolExecutor(max_workers=8) as executor:
+            futures = {executor.submit(fetch_one, fk): fk for fk in pending}
+            for future in as_completed(futures):
+                fk, top5 = future.result()
+                st.session_state[f"_ai_suggest_{tape_id}_{fk}"] = top5
 
-    # Cache all results
-    for fk, top5 in results.items():
-        st.session_state[f"_ai_suggest_{tape_id}_{fk}"] = top5
-
-    progress.empty()
     st.session_state["_ai_suggest_batch_done"] = tape_id
 
 def _heuristic_top5(fk, hdrs):
