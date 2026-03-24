@@ -422,6 +422,31 @@ async def get_validation(
     return {"tape_id": tape_id, **(tape.validation or {})}
 
 
+@app.get("/api/tapes/{tape_id}/dq", tags=["Analysis"])
+async def get_dq_checks(
+    tape_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Run comprehensive data quality checks on mapped columns."""
+    from app.data_quality import run_dq_checks
+    result = await db.execute(
+        select(Tape).where(Tape.id == tape_id, Tape.user_id == user.id)
+    )
+    tape = result.scalar_one_or_none()
+    if not tape:
+        raise HTTPException(404, "Tape not found")
+    if not tape.mapping:
+        raise HTTPException(400, "No mapping found. Map columns first.")
+    csv_path = f"uploads/{tape_id}.csv"
+    try:
+        df = pd.read_csv(csv_path)
+    except FileNotFoundError:
+        raise HTTPException(404, "Tape file not found on disk.")
+    dq = run_dq_checks(df, tape.mapping)
+    return {"tape_id": tape_id, **dq}
+
+
 # ═══════════════════════════════════════════════════════════════
 # REGRESSION
 # ═══════════════════════════════════════════════════════════════
