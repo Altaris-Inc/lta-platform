@@ -1336,7 +1336,6 @@ elif page == "✅ Data Quality":
     else:
         st.markdown('<div class="section-header">Data Quality</div>', unsafe_allow_html=True)
 
-        # ── Run DQ checks ──
         dq_key = f"_dq_{st.session_state.tape_id}"
         if st.button("🔍 Run Data Quality Checks", type="primary"):
             st.session_state.pop(dq_key, None)
@@ -1356,7 +1355,6 @@ elif page == "✅ Data Quality":
             summary = dq.get("summary", {})
             cols_data = dq.get("columns", [])
 
-            # ── Summary Cards ──
             grade = summary.get("grade", "—")
             grade_color = {"A": "#00D4AA", "B": "#4D9EFF", "C": "#FFB347", "D": "#FF4D6A"}.get(grade, "#8494A7")
             q1, q2, q3, q4, q5 = st.columns(5)
@@ -1375,7 +1373,6 @@ elif page == "✅ Data Quality":
 
             st.markdown("<br>", unsafe_allow_html=True)
 
-            # ── Filter tabs ──
             tab_all, tab_warn, tab_ok = st.tabs([
                 f"All ({len(cols_data)})",
                 f"⚠️ Warnings ({summary.get('warning_count', 0)})",
@@ -1386,8 +1383,6 @@ elif page == "✅ Data Quality":
                 if not rows:
                     st.info("No columns in this category.")
                     return
-
-                # Build summary table
                 table_rows = []
                 for r in rows:
                     table_rows.append({
@@ -1402,17 +1397,12 @@ elif page == "✅ Data Quality":
                         "Date Format": r["date_convention"] or "—",
                         "Issues": "; ".join(r["issues"]) if r["issues"] else "None",
                     })
-                st.dataframe(
-                    pd.DataFrame(table_rows),
-                    use_container_width=True,
-                    hide_index=True,
-                    height=min(500, len(table_rows) * 35 + 45),
-                )
+                st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True,
+                             height=min(500, len(table_rows) * 35 + 45))
 
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown("**🔍 Drill Down — Inspect Underlying Rows**")
 
-                # Build field options with issue counts
                 field_options = []
                 for r in rows:
                     issues_count = r["missing"] + r["domain_violations"] + r["outliers"]
@@ -1431,9 +1421,6 @@ elif page == "✅ Data Quality":
 
                 if st.session_state.get("df") is not None and col_name in st.session_state.df.columns:
                     df_full = st.session_state.df
-                    col_series = df_full[col_name]
-
-                    # Build mask for problematic rows
                     import math as _math
 
                     def _is_null_val(v):
@@ -1441,7 +1428,18 @@ elif page == "✅ Data Quality":
                             return True
                         if isinstance(v, float) and _math.isnan(v):
                             return True
-                        return str(v).strip().lower() in {"null", "none", "n/a", "na", "nan", "-", "--", ""}
+                        try:
+                            import pandas as _pd
+                            if _pd.isna(v):
+                                return True
+                        except Exception:
+                            pass
+                        import re as _re
+                        _excel_err = _re.compile(r"^#(value!|n/a|ref!|div/0!|name[?]|num!|null!|error!)", _re.I)
+                        s = str(v).strip().lower()
+                        if s in {"null", "none", "n/a", "na", "nan", "nat", "-", "--", ""}:
+                            return True
+                        return bool(_excel_err.match(s))
 
                     check_type = st.radio(
                         "Show rows with:",
@@ -1449,7 +1447,7 @@ elif page == "✅ Data Quality":
                         horizontal=True,
                         key=f"dq_check_{tab_id}_{col_name}",
                     )
-
+                    col_series = df_full[col_name]
                     if check_type == "Missing values":
                         mask = col_series.apply(_is_null_val)
                     elif check_type == "Outliers" and selected_row["outlier_low"] is not None:
@@ -1462,7 +1460,6 @@ elif page == "✅ Data Quality":
                         samples = set(str(s) for s in selected_row["domain_samples"])
                         mask = col_series.astype(str).isin(samples)
                     else:
-                        # All issues — missing + outliers
                         missing_mask = col_series.apply(_is_null_val)
                         if selected_row["outlier_low"] is not None:
                             try:
@@ -1485,20 +1482,14 @@ elif page == "✅ Data Quality":
                             f'<span style="color:#FF4D6A;font-size:12px">⚠ {len(problem_rows)} problematic rows in **{col_name}**</span>',  # noqa: E501
                             unsafe_allow_html=True,
                         )
-                        # Show problem rows with context columns
                         context_cols = [col_name]
-                        # Add a few neighbouring mapped cols for context
                         for fk, cn in list(mp.items())[:3]:
                             if cn in df_full.columns and cn != col_name:
                                 context_cols.append(cn)
                         display_df = df_full.loc[mask, context_cols].reset_index()
                         display_df.rename(columns={"index": "Row #"}, inplace=True)
-                        st.dataframe(
-                            display_df,
-                            use_container_width=True,
-                            hide_index=True,
-                            height=min(400, len(display_df) * 35 + 45),
-                        )
+                        st.dataframe(display_df, use_container_width=True, hide_index=True,
+                                     height=min(400, len(display_df) * 35 + 45))
                 else:
                     st.info("Tape data not loaded in session — reload the tape to enable drill down.")
 
@@ -1509,19 +1500,15 @@ elif page == "✅ Data Quality":
             with tab_ok:
                 _render_dq_table([r for r in cols_data if r["status"] == "✅ OK"], "ok")
 
-            # ── Unmapped Columns Section ──
             unmapped_data = dq.get("unmapped", [])
             if unmapped_data:
                 st.markdown("<br>", unsafe_allow_html=True)
                 st.markdown(
-                    f'<div style="font-size:14px;font-weight:700;color:#E8ECF1;margin-bottom:8px">' +
-                    f'⚪ Unmapped Source Columns ({len(unmapped_data)})</div>',
+                    f'<div style="font-size:14px;font-weight:700;color:#E8ECF1;margin-bottom:8px">⚪ Unmapped Source Columns ({len(unmapped_data)})</div>',
                     unsafe_allow_html=True,
                 )
                 with st.expander(f"View {len(unmapped_data)} unmapped columns", expanded=False):
                     unmapped_warn = [r for r in unmapped_data if r["status"] == "⚠️ Warning"]
-                    unmapped_ok = [r for r in unmapped_data if r["status"] != "⚠️ Warning"]
-
                     if unmapped_warn:
                         st.markdown(
                             f'<span style="color:#FFB347;font-size:12px">⚠️ {len(unmapped_warn)} columns with issues</span>',
@@ -1543,21 +1530,15 @@ elif page == "✅ Data Quality":
                                 "Date Format": r["date_convention"] or "—",
                                 "Issues": "; ".join(r["issues"]) if r["issues"] else "None",
                             })
-                        st.dataframe(
-                            pd.DataFrame(table_rows),
-                            use_container_width=True,
-                            hide_index=True,
-                            height=min(500, len(table_rows) * 35 + 45),
-                        )
+                        st.dataframe(pd.DataFrame(table_rows), use_container_width=True, hide_index=True,
+                                     height=min(500, len(table_rows) * 35 + 45))
 
                     _render_unmapped_table(unmapped_data)
 
-                    # ── Drill down for unmapped ──
                     st.markdown("<br>", unsafe_allow_html=True)
                     st.markdown("**🔍 Drill Down — Unmapped Column Rows**")
                     unmapped_options = [
-                        f"{r['column']} ({len(r['issues'])} issues)" if r["issues"]
-                        else r["column"]
+                        f"{r['column']} ({len(r['issues'])} issues)" if r["issues"] else r["column"]
                         for r in unmapped_data
                     ]
                     selected_unmapped = st.selectbox(
@@ -1577,7 +1558,18 @@ elif page == "✅ Data Quality":
                                 return True
                             if isinstance(v, float) and _math.isnan(v):
                                 return True
-                            return str(v).strip().lower() in {"null", "none", "n/a", "na", "nan", "-", "--", ""}
+                            try:
+                                import pandas as _pd
+                                if _pd.isna(v):
+                                    return True
+                            except Exception:
+                                pass
+                            import re as _re
+                            _excel_err = _re.compile(r"^#(value!|n/a|ref!|div/0!|name[?]|num!|null!|error!)", _re.I)
+                            s = str(v).strip().lower()
+                            if s in {"null", "none", "n/a", "na", "nan", "nat", "-", "--", ""}:
+                                return True
+                            return bool(_excel_err.match(s))
 
                         check_u = st.radio(
                             "Show rows with:",
@@ -1585,7 +1577,6 @@ elif page == "✅ Data Quality":
                             horizontal=True,
                             key=f"dq_ucheck_{col_name}",
                         )
-
                         col_series = df_full[col_name]
                         if check_u == "Missing values":
                             mask = col_series.apply(_is_null_u)
@@ -1609,7 +1600,6 @@ elif page == "✅ Data Quality":
 
                         problem_rows = df_full[mask][[col_name]].reset_index()
                         problem_rows.rename(columns={"index": "Row #"}, inplace=True)
-
                         if len(problem_rows) == 0:
                             st.success(f"No issues found in **{col_name}**")
                         else:
@@ -1802,6 +1792,14 @@ elif page == "📋 Column Mapping":
         if k in mp and mp[k] in hdrs:
             mapped_fields[k] = ref_fields[k]
     unmapped_ref = {k: v for k, v in ref_fields.items() if k not in mapped_fields}
+
+    # Debug logging — only logs fields with issues
+    print(f"[MAPPING DEBUG] tape_id={st.session_state.tape_id}, mp={len(mp)}, hdrs={len(hdrs)}, mapped={len(mapped_fields)}, unmapped_ref={len(unmapped_ref)}")  # noqa: E501
+    for _k, _v in mp.items():
+        _in_hdrs = _v in hdrs
+        _in_mapped = _k in mapped_fields
+        if not _in_hdrs or not _in_mapped:
+            print(f"[MAPPING DEBUG] ISSUE: field={_k}, col={_v}, in_hdrs={_in_hdrs}, in_mapped={_in_mapped}")  # noqa: E501
 
     # Also track extra mapped fields not in reference (from rule-match or other sources)
     extra_mapped = {}
