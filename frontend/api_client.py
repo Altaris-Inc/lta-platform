@@ -22,7 +22,7 @@ class LTAClient:
             h["X-API-Key"] = self.api_key
         return h
 
-    def _request(self, method, path, json_data=None, params=None, timeout=60):
+    def _request(self, method, path, json_data=None, params=None):
         url = f"{self.base}{path}"
         if params:
             url += "?" + urlencode(params)
@@ -35,7 +35,7 @@ class LTAClient:
 
         req = Request(url, data=body, headers=headers, method=method)
         try:
-            with urlopen(req, timeout=timeout) as resp:
+            with urlopen(req, timeout=60) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except HTTPError as e:
             error_body = e.read().decode("utf-8")
@@ -104,7 +104,7 @@ class LTAClient:
 
     def suggest_field(self, tape_id: str, field_key: str) -> dict:
         """Get AI-ranked column suggestions for a specific standard field."""
-        return self._request("GET", f"/api/tapes/{tape_id}/suggest/{field_key}", timeout=30)
+        return self._request("GET", f"/api/tapes/{tape_id}/suggest/{field_key}")
 
     # ── Analysis ──
     def get_analysis(self, tape_id: str) -> dict:
@@ -150,6 +150,10 @@ class LTAClient:
 
     def list_standard_fields(self) -> dict:
         return self._request("GET", "/api/fields/standard")
+
+    def get_dq(self, tape_id: str) -> dict:
+        """Run comprehensive data quality checks on mapped columns."""
+        return self._request("GET", f"/api/tapes/{tape_id}/dq", timeout=120)
 
     # ── Health ──
     def health(self) -> dict:

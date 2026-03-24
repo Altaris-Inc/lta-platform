@@ -1329,28 +1329,104 @@ elif page == "📉 Charts & Regression":
 # ═══════════════════════════════════════════════════════════════
 
 elif page == "✅ Data Quality":
-    if not vl:
+    if not tape:
         st.info("Upload a tape first.")
+    elif not mp:
+        st.info("Map columns first before running data quality checks.")
     else:
         st.markdown('<div class="section-header">Data Quality</div>', unsafe_allow_html=True)
-        comp = vl.get("completeness", 0)
-        grade = "A" if comp>=95 else "B" if comp>=85 else "C" if comp>=70 else "D"
-        q1,q2,q3,q4 = st.columns(4)
-        with q1: card("Quality Grade", grade, f"Completeness: {comp:.1f}%")
-        with q2: card("Missing Values", f"{vl.get('missing_count',0):,}")
-        with q3: card("Out of Range", f"{vl.get('oor_count',0):,}")
-        with q4: card("Fields Mapped", f"{len(mp)}")
 
-        if vl.get("issues"):
+        # ── Run DQ checks ──
+        dq_key = f"_dq_{st.session_state.tape_id}"
+        if st.button("🔍 Run Data Quality Checks", type="primary"):
+            st.session_state.pop(dq_key, None)
+
+        if dq_key not in st.session_state:
+            with st.spinner("Running data quality checks..."):
+                try:
+                    dq = client.get_dq(st.session_state.tape_id)
+                    st.session_state[dq_key] = dq
+                except Exception as e:
+                    st.error(f"DQ check failed: {e}")
+                    dq = None
+        else:
+            dq = st.session_state[dq_key]
+
+        if dq:
+            summary = dq.get("summary", {})
+            cols_data = dq.get("columns", [])
+
+            # ── Summary Cards ──
+            grade = summary.get("grade", "—")
+            grade_color = {"A": "#00D4AA", "B": "#4D9EFF", "C": "#FFB347", "D": "#FF4D6A"}.get(grade, "#8494A7")
+            q1, q2, q3, q4, q5 = st.columns(5)
+            with q1:
+                st.markdown(
+                    f'<div style="background:#1E2A3A;padding:16px;border-radius:8px;text-align:center">' +
+                    f'<div style="font-size:28px;font-weight:700;color:{grade_color}">{grade}</div>' +
+                    f'<div style="font-size:11px;color:#8494A7">Quality Grade</div>' +
+                    f'<div style="font-size:11px;color:#8494A7">{summary.get("completeness", 0):.1f}% complete</div></div>',
+                    unsafe_allow_html=True
+                )
+            with q2: card("Columns Checked", str(summary.get("total_columns_checked", 0)))
+            with q3: card("Missing Values", f"{summary.get('total_missing', 0):,}")
+            with q4: card("Domain Violations", f"{summary.get('total_violations', 0):,}")
+            with q5: card("Outliers", f"{summary.get('total_outliers', 0):,}")
+
             st.markdown("<br>", unsafe_allow_html=True)
-            st.markdown("**Issues Found:**")
-            for iss in vl["issues"]:
-                st.markdown(f'<span style="color:#FF4D6A;font-size:11px">⚠ {iss}</span>', unsafe_allow_html=True)
 
-        st.markdown("<br>", unsafe_allow_html=True)
-        st.markdown("**Field Mapping Audit:**")
-        audit = [{"Field": k, "Mapped To": v, "Status": "✅"} for k, v in sorted(mp.items())]
-        st.dataframe(pd.DataFrame(audit), use_container_width=True, hide_index=True)
+            # ── Filter tabs ──
+            tab_all, tab_warn, tab_ok = st.tabs([
+                f"All ({len(cols_data)})",
+                f"⚠️ Warnings ({summary.get('warning_count', 0)})",
+                f"✅ OK ({summary.get('ok_count', 0)})",
+            ])
+
+            def _render_dq_table(rows):
+                if not rows:
+                    st.info("No columns in this category.")
+                    return
+                table_rows = []
+                for r in rows:
+                    table_rows.append({
+                        "Status": r["status"],
+                        "Field": r["field_key"],
+                        "Column": r["column"],
+                        "Type": r["inferred_type"],
+                        "Missing": f"{r['missing_pct']:.1f}%",
+                        "Domain Issues": r["domain_violations"],
+                        "Outliers": r["outliers"],
+                        "Near-Constant": "Yes" if r["near_constant"] else "No",
+                        "Date Format": r["date_convention"] or "—",
+                        "Issues": "; ".join(r["issues"]) if r["issues"] else "None",
+                    })
+                st.dataframe(
+                    pd.DataFrame(table_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(600, len(table_rows) * 35 + 45),
+                )
+
+                # ── Detail expander for domain violation samples ──
+                violation_cols = [r for r in rows if r["domain_violations"] > 0]
+                if violation_cols:
+                    with st.expander("🔍 Domain Violation Details"):
+                        for r in violation_cols:
+                            st.markdown(
+                                f'**{r["field_key"]}** → `{r["column"]}`: ' +
+                                f'{r["domain_violations"]} violations',
+                            )
+                            if r["domain_samples"]:
+                                st.markdown(
+                                    f'Sample values: {", ".join(str(s) for s in r["domain_samples"][:5])}',
+                                )
+
+            with tab_all:
+                _render_dq_table(cols_data)
+            with tab_warn:
+                _render_dq_table([r for r in cols_data if r["status"] == "⚠️ Warning"])
+            with tab_ok:
+                _render_dq_table([r for r in cols_data if r["status"] == "✅ OK"])
 
 
 # ═══════════════════════════════════════════════════════════════
