@@ -46,7 +46,7 @@ NEAR_CONSTANT_CV_TOL = 0.01
 IQR_K = 2.0
 IQR_MIN_VALUES = 5
 
-ID_LIKE_PATTERN = re.compile(r"(?:^|_)(id|key|code|num|number|ref|uuid|guid)$", re.I)
+ID_LIKE_PATTERN = re.compile(r"(?:^|[_\s])(id|key|code|num|number|ref|uuid|guid|registration|serial|account|crn|ssn|ein|tin)(?:[_\s]|$)", re.I)
 FORCE_STRING_COLS: set = set()
 
 DATE_REGEX = re.compile(

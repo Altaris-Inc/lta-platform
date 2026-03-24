@@ -838,12 +838,12 @@ st.sidebar.markdown("---")
 
 PAGES = [
     "📋 Column Mapping",
+    "✅ Data Quality",
     "📊 Pool Overview",
     "🔍 Tape Cracking",
     "📈 Stratifications",
     "🔧 Custom Strats",
     "📉 Charts & Regression",
-    "✅ Data Quality",
     "⚡ Concentration",
     "🛡️ Risk Summary",
     "🗄️ Raw Data",
