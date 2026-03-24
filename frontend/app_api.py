@@ -1501,6 +1501,7 @@ elif page == "✅ Data Quality":
                         else:
                             mask = pd.Series([False] * len(col_series))
                     else:
+                        # All issues = missing + outliers + domain violations
                         missing_mask = col_series.apply(_is_null_val)
                         if selected_row["outlier_low"] is not None:
                             try:
@@ -1510,7 +1511,59 @@ elif page == "✅ Data Quality":
                                 outlier_mask = pd.Series([False] * len(df_full))
                         else:
                             outlier_mask = pd.Series([False] * len(df_full))
-                        mask = missing_mask | outlier_mask
+                        # Also include domain violations
+                        import re as _re
+                        field_key = selected_row.get("field_key", "")
+                        _DOMAIN = {
+                            "fico_origination": (300, 900), "fico_current": (300, 900),
+                            "interest_rate": (0, 100), "dti": (0, 200), "ltv": (0, 300),
+                            "original_term": (0, 600), "remaining_term": (0, 600),
+                            "current_balance": (0, None), "original_balance": (0, None),
+                            "origination_date": ("1980-01-01", "2100-12-31"),
+                            "maturity_date": ("1980-01-01", "2100-12-31"),
+                        }
+                        _PATTERN_DOMAIN = [
+                            (_re.compile(r"fico|credit.?score", _re.I), 300, 900),
+                            (_re.compile(r"rate|interest|coupon|apr", _re.I), 0, 100),
+                            (_re.compile(r"balance|upb|principal|amount", _re.I), 0, None),
+                            (_re.compile(r"(^|_)(term|months)", _re.I), 0, 600),
+                            (_re.compile(r"origination|fund|booking|open.?date", _re.I), "1980-01-01", "2100-12-31"),
+                            (_re.compile(r"maturity|expiry|exp.?date", _re.I), "1980-01-01", "2100-12-31"),
+                        ]
+                        domain_mask = pd.Series([False] * len(df_full))
+                        domain_rule = _DOMAIN.get(field_key)
+                        if not domain_rule:
+                            for pat, mn, mx in _PATTERN_DOMAIN:
+                                if pat.search(col_name):
+                                    domain_rule = (mn, mx)
+                                    break
+                        if domain_rule:
+                            mn, mx = domain_rule
+                            if isinstance(mn, str):
+                                from datetime import datetime as _dt
+                                mn_dt = _dt.strptime(mn, "%Y-%m-%d")
+                                mx_dt = _dt.strptime(mx, "%Y-%m-%d")
+                                def _parse_dt(v):
+                                    if _is_null_val(v):
+                                        return None
+                                    for fmt in ("%d/%m/%Y", "%m/%d/%Y", "%Y-%m-%d", "%d-%m-%Y", "%Y%m%d"):
+                                        try:
+                                            return _dt.strptime(str(v).strip(), fmt)
+                                        except Exception:
+                                            continue
+                                    return None
+                                dts = col_series.apply(_parse_dt)
+                                domain_mask = dts.notna() & ((dts < mn_dt) | (dts > mx_dt))
+                            else:
+                                try:
+                                    nums2 = col_series.apply(lambda v: float(str(v).replace(",", "").replace("$", "").strip()) if not _is_null_val(v) else None)  # noqa: E501
+                                    domain_mask = nums2.notna() & (
+                                        ((nums2 < mn) if mn is not None else pd.Series([False]*len(nums2))) |
+                                        ((nums2 > mx) if mx is not None else pd.Series([False]*len(nums2)))
+                                    )
+                                except Exception:
+                                    pass
+                        mask = missing_mask | outlier_mask | domain_mask
 
                     problem_rows = df_full[mask][[col_name]].copy()
                     problem_rows.index.name = "Row #"
