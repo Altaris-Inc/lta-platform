@@ -1456,9 +1456,50 @@ elif page == "✅ Data Quality":
                             mask = nums.notna() & ((nums < selected_row["outlier_low"]) | (nums > selected_row["outlier_high"]))  # noqa: E501
                         except Exception:
                             mask = pd.Series([False] * len(df_full))
-                    elif check_type == "Domain violations" and selected_row["domain_samples"]:
-                        samples = set(str(s) for s in selected_row["domain_samples"])
-                        mask = col_series.astype(str).isin(samples)
+                    elif check_type == "Domain violations":
+                        # Re-run domain check properly using outlier bounds or range
+                        import math as _math2
+                        def _parse_num(v):
+                            if _is_null_val(v):
+                                return None
+                            try:
+                                return float(str(v).replace(",", "").replace("$", "").replace("%", "").strip())
+                            except Exception:
+                                return None
+                        nums = col_series.apply(_parse_num)
+                        low = selected_row.get("outlier_low")
+                        high = selected_row.get("outlier_high")
+                        # Use domain violation count as signal - apply rate/balance/fico rules
+                        field_key = selected_row.get("field_key", "")
+                        _DOMAIN = {
+                            "fico_origination": (300, 900), "fico_current": (300, 900),
+                            "interest_rate": (0, 100), "dti": (0, 200), "ltv": (0, 300),
+                            "original_term": (0, 600), "remaining_term": (0, 600),
+                            "current_balance": (0, None), "original_balance": (0, None),
+                        }
+                        _PATTERN_DOMAIN = [
+                            (_re.compile(r"fico|credit.?score", _re.I), 300, 900),
+                            (_re.compile(r"rate|interest|coupon|apr", _re.I), 0, 100),
+                            (_re.compile(r"balance|upb|principal|amount", _re.I), 0, None),
+                            (_re.compile(r"(^|_)(term|months)", _re.I), 0, 600),
+                            (_re.compile(r"(^|_)(ltv|loan.?to.?value)", _re.I), 0, 300),
+                        ]
+                        import re as _re
+                        domain_min, domain_max = None, None
+                        if field_key in _DOMAIN:
+                            domain_min, domain_max = _DOMAIN[field_key]
+                        else:
+                            for pat, mn, mx in _PATTERN_DOMAIN:
+                                if pat.search(col_name):
+                                    domain_min, domain_max = mn, mx
+                                    break
+                        if domain_min is not None or domain_max is not None:
+                            mask = nums.notna() & (
+                                ((nums < domain_min) if domain_min is not None else pd.Series([False]*len(nums))) |
+                                ((nums > domain_max) if domain_max is not None else pd.Series([False]*len(nums)))
+                            )
+                        else:
+                            mask = pd.Series([False] * len(col_series))
                     else:
                         missing_mask = col_series.apply(_is_null_val)
                         if selected_row["outlier_low"] is not None:
