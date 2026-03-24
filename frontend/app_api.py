@@ -1382,7 +1382,7 @@ elif page == "✅ Data Quality":
                 f"✅ OK ({summary.get('ok_count', 0)})",
             ])
 
-            def _render_dq_table(rows):
+            def _render_dq_table(rows, tab_id="all"):
                 if not rows:
                     st.info("No columns in this category.")
                     return
@@ -1424,7 +1424,7 @@ elif page == "✅ Data Quality":
                 selected_label = st.selectbox(
                     "Select a field to inspect",
                     options=[f[0] for f in field_options],
-                    key=f"dq_drill_{id(rows)}",
+                    key=f"dq_drill_{tab_id}",
                 )
                 selected_row = next(r for label, r in field_options if label == selected_label)
                 col_name = selected_row["column"]
@@ -1447,7 +1447,7 @@ elif page == "✅ Data Quality":
                         "Show rows with:",
                         ["All issues", "Missing values", "Outliers", "Domain violations"],
                         horizontal=True,
-                        key=f"dq_check_{col_name}",
+                        key=f"dq_check_{tab_id}_{col_name}",
                     )
 
                     if check_type == "Missing values":
@@ -1503,11 +1503,11 @@ elif page == "✅ Data Quality":
                     st.info("Tape data not loaded in session — reload the tape to enable drill down.")
 
             with tab_all:
-                _render_dq_table(cols_data)
+                _render_dq_table(cols_data, "all")
             with tab_warn:
-                _render_dq_table([r for r in cols_data if r["status"] == "⚠️ Warning"])
+                _render_dq_table([r for r in cols_data if r["status"] == "⚠️ Warning"], "warn")
             with tab_ok:
-                _render_dq_table([r for r in cols_data if r["status"] == "✅ OK"])
+                _render_dq_table([r for r in cols_data if r["status"] == "✅ OK"], "ok")
 
             # ── Unmapped Columns Section ──
             unmapped_data = dq.get("unmapped", [])
