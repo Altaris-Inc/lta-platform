@@ -1386,6 +1386,8 @@ elif page == "✅ Data Quality":
                 if not rows:
                     st.info("No columns in this category.")
                     return
+
+                # Build summary table
                 table_rows = []
                 for r in rows:
                     table_rows.append({
@@ -1404,22 +1406,101 @@ elif page == "✅ Data Quality":
                     pd.DataFrame(table_rows),
                     use_container_width=True,
                     hide_index=True,
-                    height=min(600, len(table_rows) * 35 + 45),
+                    height=min(500, len(table_rows) * 35 + 45),
                 )
 
-                # ── Detail expander for domain violation samples ──
-                violation_cols = [r for r in rows if r["domain_violations"] > 0]
-                if violation_cols:
-                    with st.expander("🔍 Domain Violation Details"):
-                        for r in violation_cols:
-                            st.markdown(
-                                f'**{r["field_key"]}** → `{r["column"]}`: ' +
-                                f'{r["domain_violations"]} violations',
-                            )
-                            if r["domain_samples"]:
-                                st.markdown(
-                                    f'Sample values: {", ".join(str(s) for s in r["domain_samples"][:5])}',
-                                )
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown("**🔍 Drill Down — Inspect Underlying Rows**")
+
+                # Build field options with issue counts
+                field_options = []
+                for r in rows:
+                    issues_count = r["missing"] + r["domain_violations"] + r["outliers"]
+                    label = f"{r['field_key']} → {r['column']}"
+                    if issues_count > 0:
+                        label += f" ({issues_count} issues)"
+                    field_options.append((label, r))
+
+                selected_label = st.selectbox(
+                    "Select a field to inspect",
+                    options=[f[0] for f in field_options],
+                    key=f"dq_drill_{id(rows)}",
+                )
+                selected_row = next(r for label, r in field_options if label == selected_label)
+                col_name = selected_row["column"]
+
+                if st.session_state.get("df") is not None and col_name in st.session_state.df.columns:
+                    df_full = st.session_state.df
+                    col_series = df_full[col_name]
+
+                    # Build mask for problematic rows
+                    import math as _math
+
+                    def _is_null_val(v):
+                        if v is None:
+                            return True
+                        if isinstance(v, float) and _math.isnan(v):
+                            return True
+                        return str(v).strip().lower() in {"null", "none", "n/a", "na", "nan", "-", "--", ""}
+
+                    check_type = st.radio(
+                        "Show rows with:",
+                        ["All issues", "Missing values", "Outliers", "Domain violations"],
+                        horizontal=True,
+                        key=f"dq_check_{col_name}",
+                    )
+
+                    if check_type == "Missing values":
+                        mask = col_series.apply(_is_null_val)
+                    elif check_type == "Outliers" and selected_row["outlier_low"] is not None:
+                        try:
+                            nums = col_series.apply(lambda v: float(str(v).replace(",", "").replace("$", "").strip()) if not _is_null_val(v) else None)  # noqa: E501
+                            mask = nums.notna() & ((nums < selected_row["outlier_low"]) | (nums > selected_row["outlier_high"]))  # noqa: E501
+                        except Exception:
+                            mask = pd.Series([False] * len(df_full))
+                    elif check_type == "Domain violations" and selected_row["domain_samples"]:
+                        samples = set(str(s) for s in selected_row["domain_samples"])
+                        mask = col_series.astype(str).isin(samples)
+                    else:
+                        # All issues — missing + outliers
+                        missing_mask = col_series.apply(_is_null_val)
+                        if selected_row["outlier_low"] is not None:
+                            try:
+                                nums = col_series.apply(lambda v: float(str(v).replace(",", "").replace("$", "").strip()) if not _is_null_val(v) else None)  # noqa: E501
+                                outlier_mask = nums.notna() & ((nums < selected_row["outlier_low"]) | (nums > selected_row["outlier_high"]))  # noqa: E501
+                            except Exception:
+                                outlier_mask = pd.Series([False] * len(df_full))
+                        else:
+                            outlier_mask = pd.Series([False] * len(df_full))
+                        mask = missing_mask | outlier_mask
+
+                    problem_rows = df_full[mask][[col_name]].copy()
+                    problem_rows.index.name = "Row #"
+                    problem_rows = problem_rows.reset_index()
+
+                    if len(problem_rows) == 0:
+                        st.success(f"No issues found in **{col_name}**")
+                    else:
+                        st.markdown(
+                            f'<span style="color:#FF4D6A;font-size:12px">⚠ {len(problem_rows)} problematic rows in **{col_name}**</span>',  # noqa: E501
+                            unsafe_allow_html=True,
+                        )
+                        # Show problem rows with context columns
+                        context_cols = [col_name]
+                        # Add a few neighbouring mapped cols for context
+                        for fk, cn in list(mp.items())[:3]:
+                            if cn in df_full.columns and cn != col_name:
+                                context_cols.append(cn)
+                        display_df = df_full.loc[mask, context_cols].reset_index()
+                        display_df.rename(columns={"index": "Row #"}, inplace=True)
+                        st.dataframe(
+                            display_df,
+                            use_container_width=True,
+                            hide_index=True,
+                            height=min(400, len(display_df) * 35 + 45),
+                        )
+                else:
+                    st.info("Tape data not loaded in session — reload the tape to enable drill down.")
 
             with tab_all:
                 _render_dq_table(cols_data)
@@ -1427,6 +1508,117 @@ elif page == "✅ Data Quality":
                 _render_dq_table([r for r in cols_data if r["status"] == "⚠️ Warning"])
             with tab_ok:
                 _render_dq_table([r for r in cols_data if r["status"] == "✅ OK"])
+
+            # ── Unmapped Columns Section ──
+            unmapped_data = dq.get("unmapped", [])
+            if unmapped_data:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown(
+                    f'<div style="font-size:14px;font-weight:700;color:#E8ECF1;margin-bottom:8px">' +
+                    f'⚪ Unmapped Source Columns ({len(unmapped_data)})</div>',
+                    unsafe_allow_html=True,
+                )
+                with st.expander(f"View {len(unmapped_data)} unmapped columns", expanded=False):
+                    unmapped_warn = [r for r in unmapped_data if r["status"] == "⚠️ Warning"]
+                    unmapped_ok = [r for r in unmapped_data if r["status"] != "⚠️ Warning"]
+
+                    if unmapped_warn:
+                        st.markdown(
+                            f'<span style="color:#FFB347;font-size:12px">⚠️ {len(unmapped_warn)} columns with issues</span>',
+                            unsafe_allow_html=True,
+                        )
+
+                    def _render_unmapped_table(rows):
+                        if not rows:
+                            return
+                        table_rows = []
+                        for r in rows:
+                            table_rows.append({
+                                "Status": r["status"],
+                                "Column": r["column"],
+                                "Type": r["inferred_type"],
+                                "Missing": f"{r['missing_pct']:.1f}%",
+                                "Outliers": r["outliers"],
+                                "Near-Constant": "Yes" if r["near_constant"] else "No",
+                                "Date Format": r["date_convention"] or "—",
+                                "Issues": "; ".join(r["issues"]) if r["issues"] else "None",
+                            })
+                        st.dataframe(
+                            pd.DataFrame(table_rows),
+                            use_container_width=True,
+                            hide_index=True,
+                            height=min(500, len(table_rows) * 35 + 45),
+                        )
+
+                    _render_unmapped_table(unmapped_data)
+
+                    # ── Drill down for unmapped ──
+                    st.markdown("<br>", unsafe_allow_html=True)
+                    st.markdown("**🔍 Drill Down — Unmapped Column Rows**")
+                    unmapped_options = [
+                        f"{r['column']} ({len(r['issues'])} issues)" if r["issues"]
+                        else r["column"]
+                        for r in unmapped_data
+                    ]
+                    selected_unmapped = st.selectbox(
+                        "Select unmapped column to inspect",
+                        options=unmapped_options,
+                        key="dq_unmapped_drill",
+                    )
+                    selected_col = unmapped_data[unmapped_options.index(selected_unmapped)]
+                    col_name = selected_col["column"]
+
+                    if st.session_state.get("df") is not None and col_name in st.session_state.df.columns:
+                        df_full = st.session_state.df
+                        import math as _math
+
+                        def _is_null_u(v):
+                            if v is None:
+                                return True
+                            if isinstance(v, float) and _math.isnan(v):
+                                return True
+                            return str(v).strip().lower() in {"null", "none", "n/a", "na", "nan", "-", "--", ""}
+
+                        check_u = st.radio(
+                            "Show rows with:",
+                            ["All issues", "Missing values", "Outliers"],
+                            horizontal=True,
+                            key=f"dq_ucheck_{col_name}",
+                        )
+
+                        col_series = df_full[col_name]
+                        if check_u == "Missing values":
+                            mask = col_series.apply(_is_null_u)
+                        elif check_u == "Outliers" and selected_col["outlier_low"] is not None:
+                            try:
+                                nums = col_series.apply(lambda v: float(str(v).replace(",", "").replace("$", "").strip()) if not _is_null_u(v) else None)  # noqa: E501
+                                mask = nums.notna() & ((nums < selected_col["outlier_low"]) | (nums > selected_col["outlier_high"]))  # noqa: E501
+                            except Exception:
+                                mask = pd.Series([False] * len(df_full))
+                        else:
+                            missing_mask = col_series.apply(_is_null_u)
+                            if selected_col["outlier_low"] is not None:
+                                try:
+                                    nums = col_series.apply(lambda v: float(str(v).replace(",", "").replace("$", "").strip()) if not _is_null_u(v) else None)  # noqa: E501
+                                    outlier_mask = nums.notna() & ((nums < selected_col["outlier_low"]) | (nums > selected_col["outlier_high"]))  # noqa: E501
+                                except Exception:
+                                    outlier_mask = pd.Series([False] * len(df_full))
+                            else:
+                                outlier_mask = pd.Series([False] * len(df_full))
+                            mask = missing_mask | outlier_mask
+
+                        problem_rows = df_full[mask][[col_name]].reset_index()
+                        problem_rows.rename(columns={"index": "Row #"}, inplace=True)
+
+                        if len(problem_rows) == 0:
+                            st.success(f"No issues found in **{col_name}**")
+                        else:
+                            st.markdown(
+                                f'<span style="color:#FF4D6A;font-size:12px">⚠ {len(problem_rows)} problematic rows</span>',
+                                unsafe_allow_html=True,
+                            )
+                            st.dataframe(problem_rows, use_container_width=True, hide_index=True,
+                                         height=min(400, len(problem_rows) * 35 + 45))
 
 
 # ═══════════════════════════════════════════════════════════════

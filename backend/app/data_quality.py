@@ -395,20 +395,22 @@ def detect_date_convention(series: pd.Series) -> Optional[str]:
 
 def run_dq_checks(df: pd.DataFrame, mapping: dict) -> dict:
     """
-    Run all DQ checks on mapped columns.
+    Run all DQ checks on mapped and unmapped columns.
 
     Args:
         df: The full loan tape DataFrame
         mapping: dict of {field_key: column_name}
 
     Returns:
-        dict with summary stats and per-column results
+        dict with summary stats, per-column results, and unmapped column results
     """
     results = []
     total_cells = 0
     total_missing = 0
     total_violations = 0
     total_outliers = 0
+
+    mapped_cols = set(mapping.values())
 
     for field_key, col_name in mapping.items():
         if col_name not in df.columns:
@@ -483,6 +485,60 @@ def run_dq_checks(df: pd.DataFrame, mapping: dict) -> dict:
             "status": status,
         })
 
+    # ── Unmapped columns ──
+    unmapped_results = []
+    for col_name in df.columns:
+        if col_name in mapped_cols:
+            continue
+
+        series = df[col_name]
+        n = len(series)
+
+        inferred_type = infer_type(series, col_name)
+        missing_info = check_missing(series)
+        domain_info = check_domain(series, "", col_name, inferred_type)
+        near_const = check_near_constant(series)
+
+        outlier_info = {"outliers": 0, "outlier_pct": 0.0, "low": None, "high": None}
+        if inferred_type == "numeric":
+            outlier_info = check_outliers(series)
+
+        date_convention = None
+        if inferred_type == "datetime":
+            date_convention = detect_date_convention(series)
+
+        issues = []
+        if missing_info["missing_pct"] > 10:
+            issues.append(f"{missing_info['missing_pct']:.1f}% missing values")
+        if domain_info["violations"] > 0:
+            issues.append(f"{domain_info['violations']} out-of-range values")
+        if near_const["is_near_constant"]:
+            issues.append(f"Near-constant: {near_const['reason']}")
+        if outlier_info["outliers"] > 0:
+            issues.append(f"{outlier_info['outliers']} outliers detected")
+
+        status = "⚠️ Warning" if any("missing" in i or "out-of-range" in i for i in issues)             else "ℹ️ Info" if issues else "✅ OK"
+
+        unmapped_results.append({
+            "column": col_name,
+            "row_count": n,
+            "inferred_type": inferred_type,
+            "missing": missing_info["missing"],
+            "missing_pct": missing_info["missing_pct"],
+            "domain_violations": domain_info["violations"],
+            "domain_violation_pct": domain_info["violation_pct"],
+            "domain_samples": domain_info["samples"],
+            "near_constant": near_const["is_near_constant"],
+            "near_constant_reason": near_const.get("reason"),
+            "outliers": outlier_info["outliers"],
+            "outlier_pct": outlier_info["outlier_pct"],
+            "outlier_low": outlier_info["low"],
+            "outlier_high": outlier_info["high"],
+            "date_convention": date_convention,
+            "issues": issues,
+            "status": status,
+        })
+
     # Summary
     completeness = ((total_cells - total_missing) / total_cells * 100
                     if total_cells > 0 else 0)
@@ -503,6 +559,8 @@ def run_dq_checks(df: pd.DataFrame, mapping: dict) -> dict:
             "total_outliers": total_outliers,
             "warning_count": len(warning_cols),
             "ok_count": len(ok_cols),
+            "unmapped_count": len(unmapped_results),
         },
         "columns": results,
+        "unmapped": unmapped_results,
     }
