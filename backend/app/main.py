@@ -422,6 +422,51 @@ async def get_validation(
     return {"tape_id": tape_id, **(tape.validation or {})}
 
 
+@app.get("/api/tapes/{tape_id}/dq", tags=["Analysis"])
+async def get_dq_checks(
+    tape_id: str,
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Run DQ checks using cache/disk. Returns 404 if tape not in cache."""
+    from app.data_quality import run_dq_checks
+    result = await db.execute(
+        select(Tape).where(Tape.id == tape_id, Tape.user_id == user.id)
+    )
+    tape = result.scalar_one_or_none()
+    if not tape:
+        raise HTTPException(404, "Tape not found")
+    if not tape.mapping:
+        raise HTTPException(400, "No mapping found. Map columns first.")
+    df = _get_tape_df(tape_id)
+    dq = run_dq_checks(df, tape.mapping)
+    return {"tape_id": tape_id, **dq}
+
+
+@app.post("/api/tapes/{tape_id}/dq", tags=["Analysis"])
+async def get_dq_checks_with_data(
+    tape_id: str,
+    file: UploadFile = File(...),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Run DQ checks with CSV data in request body (fallback when cache is cold)."""
+    from app.data_quality import run_dq_checks
+    result = await db.execute(
+        select(Tape).where(Tape.id == tape_id, Tape.user_id == user.id)
+    )
+    tape = result.scalar_one_or_none()
+    if not tape:
+        raise HTTPException(404, "Tape not found")
+    if not tape.mapping:
+        raise HTTPException(400, "No mapping found. Map columns first.")
+    content = await file.read()
+    df = _read_tape(content, file.filename)
+    _save_tape_df(tape_id, df)
+    dq = run_dq_checks(df, tape.mapping)
+    return {"tape_id": tape_id, **dq}
+
+
 # ═══════════════════════════════════════════════════════════════
 # REGRESSION
 # ═══════════════════════════════════════════════════════════════
