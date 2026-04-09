@@ -84,9 +84,11 @@ DOMAIN_PATTERN_RULES = [
      "type": "numeric_range", "min": 0, "max": None},
     {"pattern": re.compile(r"(^|_)(term|months)", re.I),
      "type": "numeric_range", "min": 0, "max": 600},
-    {"pattern": re.compile(r"origination|fund|booking|open.?date", re.I),
+    {"pattern": re.compile(r"origination|fund|booking|open.?date|incorporation|inception|issue.?date", re.I),
      "type": "date_range", "min": "1980-01-01", "max": "2100-12-31"},
-    {"pattern": re.compile(r"maturity|expiry|exp.?date", re.I),
+    {"pattern": re.compile(r"maturity|expiry|exp.?date|settlement|closure", re.I),
+     "type": "date_range", "min": "1980-01-01", "max": "2100-12-31"},
+    {"pattern": re.compile(r"date", re.I),
      "type": "date_range", "min": "1980-01-01", "max": "2100-12-31"},
 ]
 
@@ -699,7 +701,7 @@ def check_panel_structure(df: pd.DataFrame, mapping: dict) -> list:
         if col_name not in df.columns:
             continue
         inferred = infer_type(df[col_name], col_name)
-        if inferred in ("string", "boolean"):
+        if inferred in ("string", "boolean") and not ID_LIKE_PATTERN.search(col_name):
             n_distinct = df[col_name].nunique(dropna=True)
             if n_distinct > HIGH_CARDINALITY_THRESHOLD:
                 flags.append({

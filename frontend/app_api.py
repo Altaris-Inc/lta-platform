@@ -769,7 +769,6 @@ if not st.session_state.tape_id:
                         st.session_state.df = pd.read_csv(_io.StringIO(csv_text))
                     except Exception:
                         st.session_state.df = None
-                    st.rerun()
 
             # Bulk delete button
             if delete_mode and len(selected_for_delete) >= 1:
@@ -1578,8 +1577,9 @@ elif page == "✅ Data Quality":
                             (_re.compile(r"rate|interest|coupon|apr", _re.I), 0, 100),
                             (_re.compile(r"balance|upb|principal|amount", _re.I), 0, None),
                             (_re.compile(r"(^|_)(term|months)", _re.I), 0, 600),
-                            (_re.compile(r"origination|fund|booking|open.?date", _re.I), "1980-01-01", "2100-12-31"),
-                            (_re.compile(r"maturity|expiry|exp.?date", _re.I), "1980-01-01", "2100-12-31"),
+                            (_re.compile(r"origination|fund|booking|open.?date|incorporation|inception|issue.?date", _re.I), "1980-01-01", "2100-12-31"),  # noqa: E501
+                            (_re.compile(r"maturity|expiry|exp.?date|settlement|closure", _re.I), "1980-01-01", "2100-12-31"),
+                            (_re.compile(r"date", _re.I), "1980-01-01", "2100-12-31"),
                         ]
                         domain_mask = pd.Series([False] * len(df_full))
                         domain_rule2 = _DOMAIN2.get(field_key)
