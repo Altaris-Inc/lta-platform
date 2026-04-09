@@ -41,7 +41,7 @@ class LTAClient:
             error_body = e.read().decode("utf-8")
             raise Exception(f"HTTP {e.code}: {error_body}")
 
-    def _upload(self, path, filename, file_bytes, params=None):
+    def _upload(self, path, filename, file_bytes, params=None, timeout=120):
         """Multipart file upload."""
         url = f"{self.base}{path}"
         if params:
@@ -59,7 +59,7 @@ class LTAClient:
 
         req = Request(url, data=body, headers=headers, method="POST")
         try:
-            with urlopen(req, timeout=120) as resp:
+            with urlopen(req, timeout=timeout) as resp:
                 return json.loads(resp.read().decode("utf-8"))
         except HTTPError as e:
             error_body = e.read().decode("utf-8")
@@ -99,8 +99,21 @@ class LTAClient:
     def update_mapping(self, tape_id: str, mapping: dict) -> dict:
         return self._request("PUT", f"/api/tapes/{tape_id}/mapping", json_data={"mapping": mapping})
 
-    def auto_match(self, tape_id: str, mode: str = "rule") -> dict:
-        return self._request("POST", f"/api/tapes/{tape_id}/automatch", params={"mode": mode})
+    def auto_match(self, tape_id: str, mode: str = "rule",
+                   csv_bytes: bytes = None, filename: str = "tape.csv") -> dict:
+        """Auto-match. Tries normal endpoint first, falls back with CSV if 404."""
+        try:
+            return self._request("POST", f"/api/tapes/{tape_id}/automatch",
+                                 params={"mode": mode}, timeout=120)
+        except Exception as e:
+            if "404" in str(e) and csv_bytes is not None:
+                return self._upload(
+                    f"/api/tapes/{tape_id}/automatch_with_data?mode={mode}",
+                    filename,
+                    csv_bytes,
+                    timeout=120,
+                )
+            raise
 
     def suggest_field(self, tape_id: str, field_key: str) -> dict:
         """Get AI-ranked column suggestions for a specific standard field."""
@@ -157,7 +170,7 @@ class LTAClient:
         """
         # First try GET — uses server cache/disk
         try:
-            return self._request("GET", f"/api/tapes/{tape_id}/dq", timeout=120)
+            return self._request("GET", f"/api/tapes/{tape_id}/dq", timeout=300)
         except Exception as e:
             if "404" in str(e) and csv_bytes is not None:
                 # Cache cold — fall back to POST with CSV data
@@ -165,6 +178,7 @@ class LTAClient:
                     f"/api/tapes/{tape_id}/dq",
                     filename,
                     csv_bytes,
+                    timeout=300,
                 )
             raise
 

@@ -709,46 +709,81 @@ if not st.session_state.tape_id:
         try:
             tapes = client.list_tapes()
 
-            # Merge mode toggle
-            if len(tapes) >= 2:
-                merge_mode = st.checkbox("Select tapes to merge", key="_merge_mode")
-            else:
-                merge_mode = False
+            # Mode toggles
+            _mode_cols = st.columns([1, 1, 1])
+            with _mode_cols[0]:
+                merge_mode = st.checkbox("Select to merge", key="_merge_mode") if len(tapes) >= 2 else False
+            with _mode_cols[1]:
+                delete_mode = st.checkbox("Select to delete", key="_delete_mode") if len(tapes) >= 1 else False
 
             selected_for_merge = []
+            selected_for_delete = []
 
             for t in tapes:
-                if merge_mode:
+                if merge_mode or delete_mode:
                     mc, c1, c2, c3, c4 = st.columns([0.3, 3, 2, 0.5, 0.5])
                     with mc:
-                        if st.checkbox("", key=f"sel_{t['id']}", label_visibility="collapsed"):
-                            selected_for_merge.append(t)
+                        checked = st.checkbox("", key=f"sel_{t['id']}", label_visibility="collapsed")
+                        if checked:
+                            if merge_mode:
+                                selected_for_merge.append(t)
+                            if delete_mode:
+                                selected_for_delete.append(t)
                 else:
                     c1, c2, c3, c4 = st.columns([3, 2, 0.5, 0.5])
-                with c1: st.markdown(f'<span style="color:#E8ECF1;font-weight:600">{t["filename"]}</span>', unsafe_allow_html=True)  # noqa: E501
 
-                with c2: st.markdown(f'<span style="color:#8494A7;font-size:11px">{t["row_count"]:,} rows</span>', unsafe_allow_html=True)  # noqa: E501
+                with c1:
+                    is_active = st.session_state.get("tape_id") == t["id"]
+                    color = "#00D4AA" if is_active else "#E8ECF1"
+                    st.markdown(f'<span style="color:{color};font-weight:600">{t["filename"]}</span>', unsafe_allow_html=True)  # noqa: E501
+
+                with c2:
+                    st.markdown(f'<span style="color:#8494A7;font-size:11px">{t["row_count"]:,} rows</span>', unsafe_allow_html=True)  # noqa: E501
 
                 with c3:
                     if st.button("→", key=f"o_{t['id']}", use_container_width=True):
-                        st.session_state.tape_id = t["id"]
-                        st.session_state.tape = t
-                        st.session_state.filename = t["filename"]
-                        st.session_state.analysis = client.get_analysis(t["id"])
-                        st.session_state.validation = client.get_validation(t["id"])
-                        try:
-                            import io as _io
-                            csv_text = client.export_csv(t["id"])
-                            st.session_state.df = pd.read_csv(_io.StringIO(csv_text))
-                        except:
-                            st.session_state.df = None
+                        st.session_state._pending_tape_id = t["id"]
                         st.rerun()
+
                 with c4:
                     if st.button("🗑", key=f"d_{t['id']}", use_container_width=True):
                         try:
                             client.delete_tape(t["id"])
-                        except: pass
+                        except Exception:
+                            pass
                         st.rerun()
+
+            # Handle pending tape load (fixes double-click issue)
+            if st.session_state.get("_pending_tape_id"):
+                _tid = st.session_state.pop("_pending_tape_id")
+                _t = next((t for t in tapes if t["id"] == _tid), None)
+                if _t:
+                    st.session_state.tape_id = _t["id"]
+                    st.session_state.tape = _t
+                    st.session_state.filename = _t["filename"]
+                    st.session_state.analysis = client.get_analysis(_t["id"])
+                    st.session_state.validation = client.get_validation(_t["id"])
+                    try:
+                        import io as _io
+                        csv_text = client.export_csv(_t["id"])
+                        st.session_state.df = pd.read_csv(_io.StringIO(csv_text))
+                    except Exception:
+                        st.session_state.df = None
+                    st.rerun()
+
+            # Bulk delete button
+            if delete_mode and len(selected_for_delete) >= 1:
+                st.markdown(f'<span style="color:#FF4D6A;font-size:12px">{len(selected_for_delete)} tapes selected for deletion</span>', unsafe_allow_html=True)  # noqa: E501
+                if st.button(f"🗑 Delete {len(selected_for_delete)} Tapes", type="primary", use_container_width=True):
+                    for t in selected_for_delete:
+                        try:
+                            client.delete_tape(t["id"])
+                            if st.session_state.get("tape_id") == t["id"]:
+                                for k in ["tape_id", "tape", "filename", "df", "analysis", "validation"]:
+                                    st.session_state.pop(k, None)
+                        except Exception:
+                            pass
+                    st.rerun()
 
             # Merge button
             if merge_mode and len(selected_for_merge) >= 2:
@@ -1610,6 +1645,39 @@ elif page == "✅ Data Quality":
             with tab_ok:
                 _render_dq_table([r for r in cols_data if r["status"] == "✅ OK"], "ok")
 
+            # ── Structural / Schema Flags ──
+            structural = dq.get("structural", [])
+            performance = dq.get("performance", [])
+            panel = dq.get("panel", [])
+            all_flags = structural + performance + panel
+
+            if all_flags:
+                st.markdown("<br>", unsafe_allow_html=True)
+                st.markdown(
+                    '<div style="font-size:14px;font-weight:700;color:#E8ECF1;margin-bottom:8px">' +
+                    f'🔬 Structural, Performance & Panel Checks ({len(all_flags)} flags)</div>',
+                    unsafe_allow_html=True,
+                )
+                flag_rows = []
+                for f in all_flags:
+                    sev = f.get("severity", "info")
+                    icon = "🔴" if sev == "error" else "🟡" if sev == "warning" else "🔵"
+                    flag_rows.append({
+                        "Severity": f"{icon} {sev.upper()}",
+                        "Flag": f.get("flag", ""),
+                        "Field": f.get("field") or "—",
+                        "Column": f.get("column") or "—",
+                        "Count": f.get("count") if f.get("count") is not None else "—",
+                        "Pct": f"{f['pct']:.1f}%" if f.get("pct") is not None else "—",
+                        "Detail": f.get("detail", ""),
+                    })
+                st.dataframe(
+                    pd.DataFrame(flag_rows),
+                    use_container_width=True,
+                    hide_index=True,
+                    height=min(400, len(flag_rows) * 35 + 45),
+                )
+
             unmapped_data = dq.get("unmapped", [])
             if unmapped_data:
                 st.markdown("<br>", unsafe_allow_html=True)
@@ -1820,8 +1888,21 @@ elif page == "📋 Column Mapping":
             if st.button("🧠 AI Match", use_container_width=True):
                 with st.spinner("AI matching..."):
                     try:
-                        updated = client.auto_match(st.session_state.tape_id, mode="ai")
-                        st.session_state.tape = updated
+                        _csv_bytes = None
+                        _tape_name = tape.get("filename", "tape.csv") if tape else "tape.csv"
+                        if st.session_state.get("df") is not None:
+                            import io as _io2
+                            _buf = _io2.StringIO()
+                            st.session_state.df.to_csv(_buf, index=False)
+                            _csv_bytes = _buf.getvalue().encode("utf-8")
+                        updated = client.auto_match(st.session_state.tape_id, mode="ai",
+                                                    csv_bytes=_csv_bytes, filename=_tape_name)
+                        if updated and "mapping" in updated:
+                            st.session_state.tape["mapping"] = updated["mapping"]
+                            for k in list(st.session_state.keys()):
+                                if k.startswith("m_"):
+                                    del st.session_state[k]
+                        st.session_state.tape = client.get_tape(st.session_state.tape_id)
                         st.session_state.analysis = client.get_analysis(st.session_state.tape_id)
                         st.session_state.validation = client.get_validation(st.session_state.tape_id)
                         st.rerun()
@@ -1831,8 +1912,21 @@ elif page == "📋 Column Mapping":
         if st.button("🧠 AI Match", use_container_width=True):
             with st.spinner("AI matching..."):
                 try:
-                    updated = client.auto_match(st.session_state.tape_id, mode="ai")
-                    st.session_state.tape = updated
+                    _csv_bytes = None
+                    _tape_name = tape.get("filename", "tape.csv") if tape else "tape.csv"
+                    if st.session_state.get("df") is not None:
+                        import io as _io2
+                        _buf = _io2.StringIO()
+                        st.session_state.df.to_csv(_buf, index=False)
+                        _csv_bytes = _buf.getvalue().encode("utf-8")
+                    updated = client.auto_match(st.session_state.tape_id, mode="ai",
+                                                csv_bytes=_csv_bytes, filename=_tape_name)
+                    if updated and "mapping" in updated:
+                        st.session_state.tape["mapping"] = updated["mapping"]
+                        for k in list(st.session_state.keys()):
+                            if k.startswith("m_"):
+                                del st.session_state[k]
+                    st.session_state.tape = client.get_tape(st.session_state.tape_id)
                     st.session_state.analysis = client.get_analysis(st.session_state.tape_id)
                     st.session_state.validation = client.get_validation(st.session_state.tape_id)
                     st.rerun()

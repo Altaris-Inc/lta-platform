@@ -355,6 +355,56 @@ async def auto_match(
 
     df = _get_tape_df(tape_id)
 
+
+@app.post("/api/tapes/{tape_id}/automatch_with_data", response_model=TapeOut, tags=["Mapping"])
+async def auto_match_with_data(
+    tape_id: str,
+    file: UploadFile = File(...),
+    mode: str = Query("rule", description="Matching mode: 'rule' or 'ai'"),
+    db: AsyncSession = Depends(get_db),
+    user: User = Depends(get_current_user),
+):
+    """Auto-match with CSV data provided — repopulates cache."""
+    result = await db.execute(
+        select(Tape).where(Tape.id == tape_id, Tape.user_id == user.id)
+    )
+    tape = result.scalar_one_or_none()
+    if not tape:
+        raise HTTPException(404, "Tape not found")
+
+    content_bytes = await file.read()
+    df = _read_tape(content_bytes, file.filename)
+    _save_tape_df(tape_id, df)
+
+    cf_result = await db.execute(
+        select(CustomField).where(CustomField.user_id == user.id)
+    )
+    custom = cf_result.scalars().all()
+    fields = dict(STD_FIELDS)
+    for cf in custom:
+        fields[cf.key] = {"label": cf.label, "patterns": cf.patterns}
+
+    if mode == "ai":
+        from app.logic import ai_match as _ai_match
+        ai_mapping = _ai_match(df, fields)
+        if ai_mapping:
+            # Merge: AI results take priority, fill gaps with rule-based
+            rule_mapping = rule_match(df, fields)
+            merged = dict(rule_mapping)
+            merged.update(ai_mapping)
+            tape.mapping = merged
+        else:
+            raise HTTPException(400, "AI matching failed. Set OPENAI_API_KEY or ANTHROPIC_API_KEY env var.")
+    else:
+        tape.mapping = rule_match(df, fields)
+
+    tape.analysis = analyze(df, tape.mapping)
+    tape.validation = validate(df, tape.mapping)
+    await db.commit()
+    await db.refresh(tape)
+    return tape
+
+
     cf_result = await db.execute(
         select(CustomField).where(CustomField.user_id == user.id)
     )
@@ -420,51 +470,6 @@ async def get_validation(
     if not tape:
         raise HTTPException(404, "Tape not found")
     return {"tape_id": tape_id, **(tape.validation or {})}
-
-
-@app.get("/api/tapes/{tape_id}/dq", tags=["Analysis"])
-async def get_dq_checks(
-    tape_id: str,
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Run DQ checks using cache/disk. Returns 404 if tape not in cache."""
-    from app.data_quality import run_dq_checks
-    result = await db.execute(
-        select(Tape).where(Tape.id == tape_id, Tape.user_id == user.id)
-    )
-    tape = result.scalar_one_or_none()
-    if not tape:
-        raise HTTPException(404, "Tape not found")
-    if not tape.mapping:
-        raise HTTPException(400, "No mapping found. Map columns first.")
-    df = _get_tape_df(tape_id)
-    dq = run_dq_checks(df, tape.mapping)
-    return {"tape_id": tape_id, **dq}
-
-
-@app.post("/api/tapes/{tape_id}/dq", tags=["Analysis"])
-async def get_dq_checks_with_data(
-    tape_id: str,
-    file: UploadFile = File(...),
-    db: AsyncSession = Depends(get_db),
-    user: User = Depends(get_current_user),
-):
-    """Run DQ checks with CSV data in request body (fallback when cache is cold)."""
-    from app.data_quality import run_dq_checks
-    result = await db.execute(
-        select(Tape).where(Tape.id == tape_id, Tape.user_id == user.id)
-    )
-    tape = result.scalar_one_or_none()
-    if not tape:
-        raise HTTPException(404, "Tape not found")
-    if not tape.mapping:
-        raise HTTPException(400, "No mapping found. Map columns first.")
-    content = await file.read()
-    df = _read_tape(content, file.filename)
-    _save_tape_df(tape_id, df)
-    dq = run_dq_checks(df, tape.mapping)
-    return {"tape_id": tape_id, **dq}
 
 
 # ═══════════════════════════════════════════════════════════════

@@ -11,47 +11,56 @@ import pandas as pd
 from typing import Optional
 
 # ═══════════════════════════════════════════════════════════════
-# STANDARD FIELDS — 47 ABS fields with regex patterns
+# STANDARD FIELDS — Tiered: Canonical (10) + Extended (20) + Optional + Longitudinal
 # ═══════════════════════════════════════════════════════════════
 
-STD_FIELDS = {
-    "loan_id":              {"label": "Loan ID",       "patterns": [r"loan.?id", r"account.?(id|num|no)", r"^id$"]},
-    "original_balance":     {"label": "Orig Bal",      "patterns": [r"orig.?(bal|amount|principal)", r"loan.?amount", r"funded"]},
+# Tier 1: Canonical — always expected, core to every tape
+CANONICAL_FIELDS = {
+    "loan_id":              {"label": "Loan ID",       "patterns": [r"loan.?id", r"account.?(id|num|no)", r"^id$", r"auction.?id"]},
     "current_balance":      {"label": "Curr Bal",      "patterns": [r"curr.?bal", r"current.?(bal|amount)", r"^upb$", r"outstanding"]},
+    "original_balance":     {"label": "Orig Bal",      "patterns": [r"orig.?(bal|amount|principal)", r"loan.?amount", r"funded", r"origination.?amount"]},
     "interest_rate":        {"label": "Rate",           "patterns": [r"interest.?rate", r"^rate$", r"coupon", r"^apr$"]},
+    "fico_origination":     {"label": "FICO Orig",     "patterns": [r"fico.?orig", r"orig.?fico", r"orig.?score"]},
+    "loan_status":          {"label": "Status",         "patterns": [r"loan.?status", r"^status$"]},
+    "origination_date":     {"label": "Orig Date",     "patterns": [r"orig.?date", r"origination", r"issue.?date"]},
+    "state":                {"label": "State",          "patterns": [r"state", r"borrower.?state"]},
+    "dti":                  {"label": "DTI",            "patterns": [r"^dti", r"debt.?to.?income", r"dti.?back"]},
+    "monthly_payment":      {"label": "Mo Pmt",        "patterns": [r"monthly.?pay", r"installment", r"^pmt$"]},
+}
+
+# Tier 2: Extended Standard — commonly available, part of standard template
+EXTENDED_FIELDS = {
     "original_term":        {"label": "Orig Term",     "patterns": [r"orig.?term", r"^term$", r"loan.?term"]},
     "remaining_term":       {"label": "Rem Term",      "patterns": [r"remain.?term", r"rem.?term"]},
-    "monthly_payment":      {"label": "Mo Pmt",        "patterns": [r"monthly.?pay", r"installment", r"^pmt$"]},
-    "fico_origination":     {"label": "FICO Orig",     "patterns": [r"fico.?orig", r"orig.?fico", r"orig.?score"]},
     "fico_current":         {"label": "FICO Curr",     "patterns": [r"fico.?curr", r"curr.?fico", r"fico$", r"credit.?score$"]},
-    "dti":                  {"label": "DTI",            "patterns": [r"^dti", r"debt.?to.?income", r"dti.?back"]},
-    "loan_status":          {"label": "Status",         "patterns": [r"loan.?status", r"^status$"]},
     "dpd":                  {"label": "DPD",            "patterns": [r"days.?past", r"^dpd$"]},
     "dpd_bucket":           {"label": "DPD Bucket",    "patterns": [r"dpd.?bucket"]},
     "times_30dpd":          {"label": "30DPD Ct",      "patterns": [r"times.?30"]},
     "times_60dpd":          {"label": "60DPD Ct",      "patterns": [r"times.?60"]},
     "times_90dpd":          {"label": "90DPD Ct",      "patterns": [r"times.?90"]},
-    "origination_date":     {"label": "Orig Date",     "patterns": [r"orig.?date", r"origination", r"issue.?date"]},
     "loan_purpose":         {"label": "Purpose",        "patterns": [r"purpose"]},
-    "state":                {"label": "State",          "patterns": [r"state", r"borrower.?state"]},
     "annual_income":        {"label": "Annual Inc",    "patterns": [r"annual.?income", r"gross.?income"]},
     "monthly_income":       {"label": "Mo Inc",        "patterns": [r"monthly.?income"]},
-    "employment_status":    {"label": "Empl",           "patterns": [r"employ.?status"]},
-    "employment_length":    {"label": "Empl Yrs",      "patterns": [r"employ.?length"]},
     "grade":                {"label": "Grade",          "patterns": [r"^grade$", r"^sub.?grade$"]},
     "origination_channel":  {"label": "Channel",        "patterns": [r"channel", r"orig.?channel"]},
     "income_verification":  {"label": "Inc Verif",     "patterns": [r"income.?verif", r"verif.?status"]},
+    "months_on_book":       {"label": "MOB",            "patterns": [r"months.?on.?book", r"loan.?age", r"^mob$"]},
+    "vintage":              {"label": "Vintage",        "patterns": [r"vintage", r"cohort", r"orig.?year"]},
+    "total_paid_principal":  {"label": "Princ Paid",   "patterns": [r"total.?princ.?paid", r"principal.?paid"]},
+    "total_paid_interest":   {"label": "Int Paid",     "patterns": [r"total.?int.?paid", r"interest.?paid"]},
+    "net_loss":             {"label": "Net Loss",      "patterns": [r"net.?loss", r"write.?off"]},
+    "recoveries":           {"label": "Recoveries",    "patterns": [r"recover"]},
+}
+
+# Tier 3: Optional — nice to have, varies by originator
+OPTIONAL_FIELDS = {
+    "employment_status":    {"label": "Empl",           "patterns": [r"employ.?status"]},
+    "employment_length":    {"label": "Empl Yrs",      "patterns": [r"employ.?length"]},
     "housing_status":       {"label": "Housing",        "patterns": [r"housing", r"home.?own"]},
     "open_accounts":        {"label": "Open Accts",    "patterns": [r"open.?(acc|credit|lines)"]},
     "revolving_utilization":{"label": "Rev Util",      "patterns": [r"revolv.?util"]},
-    "total_paid_principal":  {"label": "Princ Paid",   "patterns": [r"total.?princ.?paid", r"principal.?paid"]},
-    "total_paid_interest":   {"label": "Int Paid",     "patterns": [r"total.?int.?paid", r"interest.?paid"]},
     "origination_fee":      {"label": "Orig Fee",      "patterns": [r"orig.?fee"]},
     "late_fees":            {"label": "Late Fees",     "patterns": [r"late.?fee"]},
-    "recoveries":           {"label": "Recoveries",    "patterns": [r"recover"]},
-    "net_loss":             {"label": "Net Loss",      "patterns": [r"net.?loss", r"write.?off"]},
-    "months_on_book":       {"label": "MOB",            "patterns": [r"months.?on.?book", r"loan.?age", r"^mob$"]},
-    "vintage":              {"label": "Vintage",        "patterns": [r"vintage", r"cohort", r"orig.?year"]},
     "co_borrower":          {"label": "Co-Borr",       "patterns": [r"co.?borrow", r"joint"]},
     "hardship":             {"label": "Hardship",       "patterns": [r"hardship", r"forbear"]},
     "modification":         {"label": "Mod",            "patterns": [r"modif", r"tdr"]},
@@ -62,6 +71,160 @@ STD_FIELDS = {
     "servicer":             {"label": "Servicer",       "patterns": [r"servicer"]},
     "investor":             {"label": "Investor",       "patterns": [r"investor"]},
     "autopay":              {"label": "Autopay",        "patterns": [r"auto.?pay"]},
+
+    # ── SME / Commercial fields ──
+    "company_type":             {"label": "Co Type",        "patterns": [r"company.?type", r"entity.?type", r"business.?type", r"legal.?form"]},
+    "company_name":             {"label": "Co Name",        "patterns": [r"company.?name", r"entity.?name", r"business.?name", r"obligor.?name"]},
+    "company_registration":     {"label": "Co Reg No",      "patterns": [r"company.?reg", r"registration.?num", r"companies.?house", r"crn"]},
+    "sic_code":                 {"label": "SIC Code",       "patterns": [r"sic.?code", r"sic$", r"industry.?code", r"nace"]},
+    "region":                   {"label": "Region",          "patterns": [r"region", r"county", r"territory"]},
+    "employee_count":           {"label": "Employees",      "patterns": [r"employ.?count", r"num.?employ", r"headcount", r"employee.?num"]},
+    "annual_turnover":          {"label": "Turnover",        "patterns": [r"annual.?turn", r"turnover", r"revenue", r"annual.?rev"]},
+    "years_in_business":        {"label": "Yrs In Biz",     "patterns": [r"year.?in.?bus", r"time.?in.?bus", r"bus.?age", r"trading.?hist"]},
+    "sourcing_channel":         {"label": "Src Channel",    "patterns": [r"sourc.?channel", r"referral", r"introducer", r"broker"]},
+    "margin":                   {"label": "Margin",          "patterns": [r"^margin$", r"credit.?margin", r"spread", r"margin.?rate"]},
+    "upfront_fee":              {"label": "Upfront Fee",    "patterns": [r"upfront.?fee", r"arrangement.?fee", r"facility.?fee"]},
+    "origination_rating":       {"label": "Orig Rating",    "patterns": [r"orig.?rating", r"orig.?internal.?rat", r"initial.?rating", r"rating.?at.?orig"]},
+    "current_rating":           {"label": "Curr Rating",    "patterns": [r"curr.?rating", r"latest.?rating", r"current.?internal.?rat", r"rating.?current"]},
+    "watchlist_flag":           {"label": "Watchlist",      "patterns": [r"watchlist", r"watch.?list", r"watch.?flag"]},
+    "default_flag":             {"label": "Default Flag",   "patterns": [r"default.?flag", r"is.?default", r"defaulted"]},
+    "default_date":             {"label": "Default Date",   "patterns": [r"default.?date", r"date.?of.?default", r"event.?default"]},
+    "security_type":            {"label": "Security",        "patterns": [r"security.?type", r"collateral.?type", r"security.?desc"]},
+    "collateral_value":         {"label": "Collateral Val", "patterns": [r"collateral.?val", r"security.?val", r"collateral.?amount"]},
+    "ltv":                      {"label": "LTV",             "patterns": [r"^ltv$", r"loan.?to.?val", r"ltv.?ratio"]},
+    "facility_type":            {"label": "Facility Type",  "patterns": [r"facility.?type", r"loan.?type", r"product.?type"]},
+    "repayment_type":           {"label": "Repmt Type",     "patterns": [r"repay.?type", r"repayment.?struct", r"amort.?type"]},
+    "currency":                 {"label": "Currency",        "patterns": [r"currency", r"ccy", r"^curr$"]},
+}
+
+# Longitudinal fields — for time-series tapes with multiple rows per loan
+LONGITUDINAL_FIELDS = {
+    "reporting_date":           {"label": "Report Date",    "patterns": [r"report.?date", r"as.?of.?date", r"asofdate", r"snapshot.?date", r"period.?date", r"cycle.?date", r"^asof"]},
+    "cumulative_principal_paid":{"label": "Cum Princ",      "patterns": [r"cum.?princ", r"cumul.?princ", r"accum.?princ", r"princ.?repay", r"principal.?repay"]},
+    "cumulative_interest_paid": {"label": "Cum Int",        "patterns": [r"cum.?int", r"cumul.?int", r"accum.?int", r"int.?repay", r"interest.?repay"]},
+    "period_principal":         {"label": "Period Princ",   "patterns": [r"period.?princ", r"monthly.?princ", r"princ.?collect", r"princ.?distrib"]},
+    "period_interest":          {"label": "Period Int",     "patterns": [r"period.?int", r"monthly.?int", r"int.?collect", r"int.?distrib"]},
+    "scheduled_payment":        {"label": "Sched Pmt",     "patterns": [r"sched.?p(ay|mt)", r"contract.?p(ay|mt)"]},
+    "beginning_balance":        {"label": "Beg Bal",       "patterns": [r"beg.?bal", r"beginning.?bal", r"bop.?bal", r"start.?bal"]},
+    "ending_balance":           {"label": "End Bal",       "patterns": [r"end.?bal", r"ending.?bal", r"eop.?bal", r"close.?bal"]},
+}
+
+# Combined: all standard fields (backward compatible)
+STD_FIELDS = {}
+STD_FIELDS.update(CANONICAL_FIELDS)
+STD_FIELDS.update(EXTENDED_FIELDS)
+STD_FIELDS.update(OPTIONAL_FIELDS)
+STD_FIELDS.update(LONGITUDINAL_FIELDS)
+
+# Field tier lookup
+FIELD_TIERS = {}
+for k in CANONICAL_FIELDS: FIELD_TIERS[k] = "canonical"
+for k in EXTENDED_FIELDS:  FIELD_TIERS[k] = "extended"
+for k in OPTIONAL_FIELDS:  FIELD_TIERS[k] = "optional"
+for k in LONGITUDINAL_FIELDS: FIELD_TIERS[k] = "longitudinal"
+
+
+# ═══════════════════════════════════════════════════════════════
+# ASSET CLASS DEFINITIONS
+# ═══════════════════════════════════════════════════════════════
+
+ASSET_CLASSES = {
+    "uk_sme": "UK SME",
+    "uk_consumer": "UK Consumer",
+    "ccsf_srt": "CCSF SRT",
+    "corporate_srt": "Corporate SRT",
+    "other": "Other",
+}
+
+# Canonical fields per asset class — ordered by priority
+# These are the fields that MUST be mapped for meaningful analysis
+ASSET_CLASS_FIELDS = {
+    "uk_sme": [
+        # Borrower / Obligor
+        "company_name",
+        "company_registration",
+        "company_type",
+        "sic_code",
+        "region",
+        "employee_count",
+        "annual_turnover",
+        "years_in_business",
+        "sourcing_channel",
+        # Loan Economics
+        "loan_id",
+        "loan_status",
+        "loan_purpose",
+        "origination_date",
+        "maturity_date",
+        "original_balance",
+        "current_balance",
+        "interest_rate",
+        "margin",
+        "original_term",
+        "remaining_term",
+        "upfront_fee",
+        "currency",
+        # Credit Quality
+        "origination_rating",
+        "current_rating",
+        "pd_score",
+        "lgd",
+        "expected_loss",
+        "dpd",
+        "dpd_bucket",
+        "watchlist_flag",
+        "default_flag",
+        "default_date",
+        "net_loss",
+        "recoveries",
+        # Security / Collateral
+        "security_type",
+        "collateral_value",
+        "ltv",
+        # Facility Structure
+        "facility_type",
+        "repayment_type",
+        # Performance
+        "vintage",
+        "months_on_book",
+        # Longitudinal
+        "reporting_date",
+        "beginning_balance",
+        "ending_balance",
+        "period_principal",
+        "period_interest",
+        "scheduled_payment",
+        "cumulative_principal_paid",
+        "cumulative_interest_paid",
+    ],
+    "uk_consumer": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "fico_origination", "fico_current", "loan_status", "origination_date",
+        "monthly_payment", "dti", "dpd", "dpd_bucket", "loan_purpose",
+        "annual_income", "income_verification", "employment_status",
+        "vintage", "months_on_book", "net_loss", "recoveries",
+        "reporting_date", "beginning_balance", "ending_balance",
+    ],
+    "ccsf_srt": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "loan_status", "origination_date", "dpd", "dpd_bucket",
+        "pd_score", "lgd", "expected_loss", "net_loss", "recoveries",
+        "pool_id", "vintage", "months_on_book",
+        "reporting_date", "beginning_balance", "ending_balance",
+        "cumulative_principal_paid", "cumulative_interest_paid",
+    ],
+    "corporate_srt": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "loan_status", "origination_date", "original_term", "remaining_term",
+        "dpd", "pd_score", "lgd", "expected_loss", "net_loss", "recoveries",
+        "loan_purpose", "pool_id", "vintage", "months_on_book",
+        "reporting_date", "beginning_balance", "ending_balance",
+    ],
+    "other": [
+        "loan_id", "current_balance", "original_balance", "interest_rate",
+        "loan_status", "origination_date", "monthly_payment", "dpd",
+        "vintage", "months_on_book",
+    ],
 }
 
 
@@ -170,6 +333,481 @@ def rule_match(df: pd.DataFrame, fields: Optional[dict] = None) -> dict:
                         field_best[fk] = (h, score)
 
     return {fk: col for fk, (col, _) in field_best.items()}
+
+
+# ═══════════════════════════════════════════════════════════════
+# TAPE TYPE DETECTION & LONGITUDINAL PROCESSING
+# ═══════════════════════════════════════════════════════════════
+
+def detect_tape_type(df: pd.DataFrame, mp: dict) -> dict:
+    """
+    Detect whether tape is static (one row per loan) or longitudinal (time-series).
+    Returns: {type: "static"|"longitudinal", unique_loans, total_rows, periods, date_range}
+    """
+    id_col = mp.get("loan_id")
+    if not id_col or id_col not in df.columns:
+        return {"type": "static", "unique_loans": len(df), "total_rows": len(df),
+                "periods": 1, "date_range": None}
+
+    unique = df[id_col].nunique()
+    total = len(df)
+    ratio = unique / total if total > 0 else 1.0
+
+    # Check for reporting date
+    date_col = mp.get("reporting_date")
+    date_range = None
+    periods = 1
+    if date_col and date_col in df.columns:
+        try:
+            dates = pd.to_datetime(df[date_col], errors='coerce').dropna()
+            if len(dates) > 0:
+                date_range = {"min": str(dates.min().date()), "max": str(dates.max().date())}
+                periods = dates.nunique()
+        except:
+            pass
+
+    if ratio > 0.95:
+        tape_type = "static"
+    elif ratio < 0.5:
+        tape_type = "longitudinal"
+    else:
+        # Ambiguous — check if we have a reporting date column
+        tape_type = "longitudinal" if date_col else "static"
+
+    return {
+        "type": tape_type,
+        "unique_loans": int(unique),
+        "total_rows": total,
+        "periods": int(periods),
+        "date_range": date_range,
+    }
+
+
+def _ai_detect_cumulative(df: pd.DataFrame, id_col: str, date_col: str,
+                           candidate_cols: list, openai_key: str = None) -> list:
+    """
+    Use AI to determine which candidate columns contain cumulative values
+    by sampling 5-10 loan IDs and sending the data to the model.
+
+    Returns list of column names confirmed as cumulative.
+    """
+    import os, json as _json
+    import httpx
+
+    openai_key = openai_key or os.getenv("OPENAI_API_KEY")
+    anthropic_key = os.getenv("ANTHROPIC_API_KEY")
+    base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+
+    if not openai_key and not anthropic_key:
+        print("AI cumulative detection: no API key found — skipping")
+        return []
+
+    if not candidate_cols:
+        return []
+
+    # Sample 5-10 loan IDs that have at least 3 periods each
+    loan_counts = df.groupby(id_col).size()
+    eligible_loans = loan_counts[loan_counts >= 3].index.tolist()
+    sample_loans = eligible_loans[:8] if len(eligible_loans) >= 8 else eligible_loans
+    if not sample_loans:
+        return []
+
+    sample_df = df[df[id_col].isin(sample_loans)].copy()
+    if date_col and date_col in sample_df.columns:
+        try:
+            sample_df["_sort_date"] = pd.to_datetime(sample_df[date_col], errors="coerce")
+            sample_df = sample_df.sort_values([id_col, "_sort_date"]).drop(columns=["_sort_date"])
+        except Exception:
+            sample_df = sample_df.sort_values([id_col])
+    else:
+        sample_df = sample_df.sort_values([id_col])
+
+    # Build sample table string showing id + date + candidate cols
+    display_cols = [id_col]
+    if date_col and date_col in sample_df.columns:
+        display_cols.append(date_col)
+    display_cols += candidate_cols
+
+    sample_str = sample_df[display_cols].head(40).to_string(index=False)
+
+    prompt = f"""You are an ABS loan tape data analyst. I have a longitudinal loan tape (multiple rows per loan ID over time).
+
+I need to determine which of these columns contain CUMULATIVE values (running totals that increase over time per loan) vs PERIODIC values (the amount for that specific period only).
+
+Columns to analyze: {candidate_cols}
+
+Here is a sample of the data showing multiple periods for several loan IDs:
+
+{sample_str}
+
+For each column, determine if the values are:
+- CUMULATIVE: values generally increase over time for each loan (running total)
+- PERIODIC: values vary up and down each period (not a running total)
+
+Focus especially on: principal_repayments, interest_paid, default_amount, recoveries, and similar financial flow columns.
+
+Respond ONLY with a JSON object like:
+{{"cumulative": ["col1", "col2"], "periodic": ["col3", "col4"]}}
+No explanation, no markdown, just the JSON."""
+
+    try:
+        if openai_key:
+            resp = httpx.post(
+                f"{base_url}/chat/completions",
+                headers={"Authorization": f"Bearer {openai_key}",
+                         "Content-Type": "application/json"},
+                json={"model": "gpt-4o-mini", "max_tokens": 500,
+                      "messages": [{"role": "user", "content": prompt}]},
+                timeout=30, verify=False,
+            )
+            resp.raise_for_status()
+            text = resp.json()["choices"][0]["message"]["content"].strip()
+        else:
+            resp = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={"x-api-key": anthropic_key,
+                         "anthropic-version": "2023-06-01",
+                         "content-type": "application/json"},
+                json={"model": "claude-3-5-sonnet-20241022", "max_tokens": 500,
+                      "messages": [{"role": "user", "content": prompt}]},
+                timeout=30, verify=False,
+            )
+            resp.raise_for_status()
+            text = resp.json()["content"][0]["text"].strip()
+
+        text = re.sub(r'^```json\s*|\s*```$', '', text).strip()
+        result = _json.loads(text)
+        confirmed = [c for c in result.get("cumulative", []) if c in candidate_cols]
+        print(f"AI cumulative detection: cumulative={confirmed}, "
+              f"periodic={result.get('periodic', [])}")
+        return confirmed
+
+    except Exception as e:
+        print(f"AI cumulative detection failed: {e}")
+        return []
+
+
+def detect_and_derive_cumulative_columns(df: pd.DataFrame, id_col: str,
+                                          period_col: str = None) -> tuple:
+    """
+    Detect cumulative columns and derive period deltas per loan.
+    Processes each loan individually sorted by date, then concatenates.
+    Returns (enriched_df, log).
+    """
+    import os
+    log = []
+
+    CUM_PATTERNS = [
+        (r'^cum[_\s](.+)',        r'\1'),
+        (r'^cumulative[_\s](.+)', r'\1'),
+        (r'^ytd[_\s](.+)',        r'\1'),
+        (r'^accum[_\s](.+)',      r'\1'),
+        (r'^running[_\s](.+)',    r'\1'),
+        (r'(.+)_to_date$',        r'\1'),
+        (r'(.+)_cumulative$',     r'\1'),
+        (r'(.+)_cum$',            r'\1'),
+        (r'(.+)_ytd$',            r'\1'),
+    ]
+
+    already_period = set(c for c in df.columns if re.match(r'^period', c, re.IGNORECASE))
+
+    # Parse date column once
+    sort_col = None
+    if period_col and period_col in df.columns:
+        try:
+            if pd.api.types.is_datetime64_any_dtype(df[period_col]):
+                sort_col = period_col
+            else:
+                df['_sort_date'] = pd.to_datetime(df[period_col], errors='coerce')
+                sort_col = '_sort_date'
+            log.append(f"Date column: {period_col}")
+        except Exception as e:
+            log.append(f"Could not parse date: {e}")
+
+    # ── Detect cumulative columns ──
+    cum_cols = []
+
+    # Method 1: name patterns
+    for col in df.columns:
+        if col in already_period:
+            continue
+        for pattern, _ in CUM_PATTERNS:
+            if re.search(pattern, col.strip(), re.IGNORECASE):
+                cum_cols.append(col)
+                break
+
+    # Method 2: AI detection
+    ai_target_patterns = [
+        r"principal", r"interest", r"default", r"recovery", r"recoveri",
+        r"loss", r"prepay", r"charge.?off", r"write.?off", r"collection",
+        r"repay", r"paid", r"received",
+    ]
+    ai_candidates = [
+        col for col in df.columns
+        if col not in already_period
+        and col not in cum_cols
+        and any(re.search(p, col, re.IGNORECASE) for p in ai_target_patterns)
+        and df[col].apply(parse_numeric).notna().sum() >= 10
+    ]
+    if ai_candidates:
+        log.append(f"Sending {len(ai_candidates)} column(s) to AI: {ai_candidates}")
+        try:
+            ai_confirmed = _ai_detect_cumulative(
+                df, id_col=id_col, date_col=period_col,
+                candidate_cols=ai_candidates,
+                openai_key=os.getenv("OPENAI_API_KEY")
+            )
+            if ai_confirmed:
+                cum_cols.extend(ai_confirmed)
+                log.append(f"AI confirmed cumulative: {ai_confirmed}")
+        except Exception as e:
+            log.append(f"AI detection failed (skipping): {e}")
+
+    # Method 3: monotonic heuristic
+    skip_patterns = [
+        r"id$", r"date", r"status", r"type", r"name", r"code", r"flag",
+        r"indicator", r"channel", r"purpose", r"rate$", r"score$", r"balance$",
+        r"vintage", r"cohort", r"orig", r"amount$", r"term$", r"income",
+        r"month$", r"year$", r"quarter", r"number$", r"count$", r"ratio$",
+        r"pct$", r"percent", r"^period", r"months_since", r"days_since",
+        r"_rate$", r"_score$", r"_index$", r"_flag$", r"_indicator$",
+    ]
+    for col in df.columns:
+        if col in already_period or col in cum_cols:
+            continue
+        if any(re.search(p, col, re.IGNORECASE) for p in skip_patterns):
+            continue
+        if df[col].apply(parse_numeric).notna().sum() < 10:
+            continue
+        try:
+            def _mono_ratio(g):
+                v = g.apply(parse_numeric).dropna()
+                if len(v) < 2:
+                    return 0.0
+                return float((v.diff().dropna() >= 0).sum()) / len(v.diff().dropna())
+            mono_ratios = df.groupby(id_col)[col].apply(_mono_ratio)
+            if (mono_ratios >= 0.85).mean() >= 0.70:
+                cum_cols.append(col)
+        except Exception:
+            continue
+
+    if not cum_cols:
+        log.append("No cumulative columns detected")
+        if '_sort_date' in df.columns:
+            df = df.drop(columns=['_sort_date'])
+        return df, log
+
+    log.append(f"Cumulative columns: {cum_cols}")
+
+    # ── Derive period columns ──
+    # Build name map
+    period_names = {}
+    for cum_col in cum_cols:
+        base_name = cum_col.strip()
+        for pattern, replacement in CUM_PATTERNS:
+            cleaned = re.sub(pattern, replacement, base_name, flags=re.IGNORECASE).strip('_').strip()
+            if cleaned != base_name:
+                base_name = cleaned
+                break
+        period_col_name = f"period_{base_name.lower().replace(' ', '_')}"
+        existing = [c for c in df.columns if c != cum_col and (
+            base_name.lower() in c.lower() or
+            c.lower().replace('period_', '') == base_name.lower()
+        )]
+        if existing:
+            log.append(f"Skipping '{cum_col}' — '{existing[0]}' already exists")
+        else:
+            period_names[cum_col] = period_col_name
+
+    if not period_names:
+        if '_sort_date' in df.columns:
+            df = df.drop(columns=['_sort_date'])
+        return df, log
+
+    # Process each loan individually — sort within group, diff, concatenate
+    loan_groups = []
+    for loan_id, group in df.groupby(id_col, sort=False):
+        # Sort this loan's rows by date
+        group = group.copy()
+        if period_col and period_col in group.columns:
+            group['_grp_sort'] = pd.to_datetime(group[period_col], errors='coerce')
+            group = group.sort_values('_grp_sort').drop(columns=['_grp_sort'])
+
+        for cum_col, period_col_name in period_names.items():
+            if cum_col not in group.columns:
+                continue
+            vals = group[cum_col].apply(parse_numeric)
+            if vals.notna().sum() == 0:
+                continue  # skip entirely non-numeric columns
+            diffs = vals.diff().clip(lower=0)
+            diffs.iloc[0] = vals.iloc[0] if pd.notna(vals.iloc[0]) else 0.0
+            group[period_col_name] = diffs
+
+        loan_groups.append(group)
+
+    df = pd.concat(loan_groups).reset_index(drop=True)
+
+    # Re-sort the concatenated df by loan_id + date so output is in chronological order
+    if sort_col and sort_col in df.columns:
+        df = df.sort_values([id_col, sort_col]).reset_index(drop=True)
+    elif period_col and period_col in df.columns:
+        df = df.sort_values([id_col, period_col]).reset_index(drop=True)
+
+    for cum_col, period_col_name in period_names.items():
+        log.append(f"✅ Derived '{period_col_name}' from '{cum_col}' across {df[id_col].nunique():,} loans")
+
+    if '_sort_date' in df.columns:
+        df = df.drop(columns=['_sort_date'])
+
+    return df, log
+
+
+
+def process_longitudinal(df: pd.DataFrame, mp: dict) -> tuple:
+    """
+    Process a longitudinal tape:
+    1. Sort by loan ID + date
+    2. Decompose cumulative fields into per-period deltas
+    3. Derive missing fields using amortization logic
+    4. Extract latest snapshot per loan for pool analysis
+
+    Returns: (latest_snapshot_df, full_timeseries_df, processing_log)
+    """
+    log = []
+    id_col = mp.get("loan_id")
+    date_col = mp.get("reporting_date")
+
+    if not id_col or id_col not in df.columns:
+        log.append("No loan_id mapped — cannot process longitudinal tape")
+        return df, df, log
+
+    # Step 1: Sort
+    sort_cols = [id_col]
+    if date_col and date_col in df.columns:
+        try:
+            df["_parsed_date"] = pd.to_datetime(df[date_col], errors='coerce')
+            sort_cols.append("_parsed_date")
+            log.append(f"Sorted by {id_col} + {date_col}")
+        except:
+            log.append(f"Could not parse date column {date_col}, using row order")
+    else:
+        log.append("No reporting_date mapped — assuming rows are in chronological order per loan")
+
+    df = df.sort_values(sort_cols).reset_index(drop=True)
+    grouped = df.groupby(id_col)
+
+    # Step 2a: Auto-detect and derive ALL cumulative columns generically
+    # Use _parsed_date if available (already datetime) so sorting inside detect is correct
+    effective_date_col = "_parsed_date" if "_parsed_date" in df.columns else (
+        date_col if date_col and date_col in df.columns else None
+    )
+    df, cum_log = detect_and_derive_cumulative_columns(
+        df,
+        id_col=id_col,
+        period_col=effective_date_col
+    )
+    log.extend(cum_log)
+
+    # Refresh groupby after potential new columns / reindex
+    grouped = df.groupby(id_col)
+
+    # Step 2b: Decompose explicitly mapped cumulative fields (principal + interest)
+    # Use same per-loan sort+diff approach to avoid index alignment issues
+    sort_col_2b = "_parsed_date" if "_parsed_date" in df.columns else date_col
+
+    def _safe_diff(df, col, sort_col):
+        """Per-loan sorted diff, returns series aligned to df.index."""
+        groups = []
+        for _, grp in df.groupby(id_col, sort=False):
+            grp = grp.copy()
+            if sort_col and sort_col in grp.columns:
+                grp = grp.sort_values(sort_col)
+            vals = grp[col].apply(parse_numeric)
+            diffs = vals.diff().clip(lower=0)
+            diffs.iloc[0] = vals.iloc[0]
+            grp["_result"] = diffs
+            groups.append(grp)
+        return pd.concat(groups)["_result"].reindex(df.index)
+
+    cum_princ_col = mp.get("cumulative_principal_paid")
+    if cum_princ_col and cum_princ_col in df.columns:
+        df["_period_principal"] = _safe_diff(df, cum_princ_col, sort_col_2b)
+        log.append(f"Decomposed {cum_princ_col} → _period_principal")
+
+    cum_int_col = mp.get("cumulative_interest_paid")
+    if cum_int_col and cum_int_col in df.columns:
+        df["_period_interest"] = _safe_diff(df, cum_int_col, sort_col_2b)
+        log.append(f"Decomposed {cum_int_col} → _period_interest")
+
+    # Use existing period fields if available (they take priority over derived)
+    per_princ_col = mp.get("period_principal")
+    if per_princ_col and per_princ_col in df.columns:
+        df["_period_principal"] = df[per_princ_col].apply(parse_numeric)
+        log.append(f"Using existing period principal: {per_princ_col}")
+
+    per_int_col = mp.get("period_interest")
+    if per_int_col and per_int_col in df.columns:
+        df["_period_interest"] = df[per_int_col].apply(parse_numeric)
+        log.append(f"Using existing period interest: {per_int_col}")
+
+    # Step 3: Derive missing fields (amortization logic)
+    bal_col = mp.get("current_balance") or mp.get("ending_balance")
+    pmt_col = mp.get("monthly_payment") or mp.get("scheduled_payment")
+
+    # Derive principal from balance change if not already computed
+    if bal_col and bal_col in df.columns and "_period_principal" not in df.columns:
+        groups = []
+        for _, grp in df.groupby(id_col, sort=False):
+            grp = grp.copy()
+            if sort_col_2b and sort_col_2b in grp.columns:
+                grp = grp.sort_values(sort_col_2b)
+            bal = grp[bal_col].apply(parse_numeric)
+            grp["_period_principal"] = -bal.diff()
+            grp.iloc[0, grp.columns.get_loc("_period_principal")] = np.nan
+            groups.append(grp)
+        df = pd.concat(groups).reset_index(drop=True)
+        log.append(f"Derived _period_principal from balance change ({bal_col})")
+
+    # Derive interest = payment - principal
+    if pmt_col and pmt_col in df.columns and "_period_principal" in df.columns and "_period_interest" not in df.columns:
+        df["_period_interest"] = df[pmt_col].apply(parse_numeric) - df["_period_principal"]
+        log.append(f"Derived _period_interest = {pmt_col} - _period_principal")
+
+    # Derive payment = principal + interest
+    if "_period_principal" in df.columns and "_period_interest" in df.columns:
+        if not pmt_col or pmt_col not in df.columns:
+            df["_derived_payment"] = df["_period_principal"] + df["_period_interest"]
+            log.append("Derived _derived_payment = _period_principal + _period_interest")
+
+    # Step 4: Refresh grouped from updated df, then extract latest snapshot
+    grouped = df.groupby(id_col)
+    latest = grouped.tail(1).copy()
+
+    # Compute loan-level aggregates from time-series
+    agg_dict = {}
+    if "_period_principal" in df.columns:
+        agg_dict["_period_principal"] = "sum"
+    if "_period_interest" in df.columns:
+        agg_dict["_period_interest"] = "sum"
+
+    if agg_dict:
+        loan_totals = grouped.agg(agg_dict)
+        loan_totals.columns = [f"_total{c}" for c in loan_totals.columns]
+        latest = latest.set_index(id_col).join(loan_totals).reset_index()
+
+    # Count periods per loan
+    period_counts = grouped.size().rename("_period_count")
+    latest = latest.set_index(id_col).join(period_counts).reset_index()
+
+    log.append(f"Extracted latest snapshot: {len(latest)} loans from {len(df)} rows")
+
+    # Clean up temp column
+    if "_parsed_date" in df.columns:
+        df = df.drop(columns=["_parsed_date"])
+    if "_parsed_date" in latest.columns:
+        latest = latest.drop(columns=["_parsed_date"])
+
+    return latest, df, log
 
 
 def score_template(template_mapping: dict, headers: list) -> float:
@@ -345,7 +983,7 @@ VALIDATION_RULES = {
     "interest_rate":    {"min": 0, "max": 35},
     "fico_origination": {"min": 300, "max": 900},
     "fico_current":     {"min": 300, "max": 900},
-    "dti":              {"min": 0, "max": 100},
+    "dti":              {"min": 0, "max": 200},
 }
 
 def validate(df: pd.DataFrame, mp: dict) -> dict:
@@ -434,3 +1072,212 @@ def calc_multi_regression(x1: np.ndarray, x2: np.ndarray, y: np.ndarray) -> Opti
         "b0": float(coef[0]), "b1": float(coef[1]), "b2": float(coef[2]),
         "r2": float(r2), "adj_r2": float(adj_r2), "n": n,
     }
+
+
+# ═══════════════════════════════════════════════════════════════
+# AI AUTO-MATCH (OpenAI or Anthropic)
+# ═══════════════════════════════════════════════════════════════
+
+def ai_rank_candidates(
+    field_key: str,
+    field_def: dict,
+    candidate_cols: list,
+    df: pd.DataFrame,
+    openai_key: str = None,
+) -> list:
+    """
+    Use AI to rank candidate columns for a specific standard field.
+    Returns list of (score, col_name) sorted descending, score 0-10.
+    Falls back to empty list on failure.
+    """
+    import os, json as _json
+    openai_key = openai_key or os.getenv("OPENAI_API_KEY")
+    if not openai_key or not candidate_cols:
+        return []
+
+    label = field_def.get("label", field_key)
+    description = field_def.get("description", "")
+
+    # Build sample values per candidate column
+    col_samples = {}
+    for col in candidate_cols:
+        if col in df.columns:
+            samples = df[col].dropna().head(5).tolist()
+            col_samples[col] = samples
+
+    col_info = "\n".join(
+        f"  - {col}: sample values = {col_samples.get(col, [])}"
+        for col in candidate_cols
+    )
+
+    prompt = f"""You are an ABS loan tape analyst. Score how well each source column matches a standard field.
+
+Standard field: "{field_key}"
+Label: "{label}"
+Description: "{description}"
+
+Candidate source columns with sample values:
+{col_info}
+
+Score each column 0-10 for how likely it maps to "{label}":
+- 10 = almost certain match (same concept, compatible data type)
+- 5  = plausible match
+- 0  = no match (wrong concept or data type)
+
+Consider:
+- Semantic meaning (e.g. "OutstandingPrincipal" is a strong match for "current_balance")
+- Data type (dates should not match amount fields, strings should not match numeric fields)
+- Sample values (do they look like typical values for this field?)
+
+Respond ONLY with a JSON object mapping column_name to score (integer 0-10).
+Example: {{"OutstandingPrincipal": 9, "OriginalBalance": 3, "LoanDate": 0}}
+No explanation, no markdown, just JSON."""
+
+    try:
+        import httpx
+        base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1").rstrip("/")
+        resp = httpx.post(
+            f"{base_url}/chat/completions",
+            headers={"Authorization": f"Bearer {openai_key}", "Content-Type": "application/json"},
+            json={
+                "model": "gpt-4o-mini",
+                "max_tokens": 500,
+                "messages": [{"role": "user", "content": prompt}],
+            },
+            timeout=15,
+            verify=False,
+        )
+        resp.raise_for_status()
+        text = resp.json()["choices"][0]["message"]["content"].strip()
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+        # Strip any trailing commas before } or ] which cause JSON parse errors
+        text = re.sub(r',\s*([}\]])', r'\1', text)
+        # Extract first JSON object if extra text present
+        brace_start = text.find('{')
+        brace_end = text.rfind('}')
+        if brace_start != -1 and brace_end != -1:
+            text = text[brace_start:brace_end + 1]
+        scores = _json.loads(text)
+        result = [(int(v), k) for k, v in scores.items() if k in candidate_cols]
+        result.sort(key=lambda x: -x[0])
+        return result
+    except Exception as e:
+        print(f"ai_rank_candidates failed for {field_key}: {e}")
+        return []
+
+
+def ai_match(df: pd.DataFrame, fields: Optional[dict] = None, api_key: Optional[str] = None) -> Optional[dict]:
+    """
+    Use AI (OpenAI GPT or Anthropic Claude) to match CSV columns to standard ABS fields.
+    Checks OPENAI_API_KEY first, then ANTHROPIC_API_KEY.
+    Returns dict: {field_key: column_name} or None on failure.
+    """
+    import os
+    import json as _json
+
+    openai_key = os.getenv("OPENAI_API_KEY")
+    anthropic_key = api_key or os.getenv("ANTHROPIC_API_KEY")
+
+    if not openai_key and not anthropic_key:
+        return None
+
+    flds = fields or STD_FIELDS
+    hdrs = list(df.columns)
+
+    # Build sample rows for context
+    sample = df.head(5).to_dict(orient="records")
+    sample_str = ""
+    for i, row in enumerate(sample):
+        sample_str += f"Row {i+1}: {row}\n"
+
+    field_list = "\n".join(f"  {k}: {v['label']}" for k, v in flds.items())
+
+    prompt = f"""You are an ABS loan tape analyst. Match CSV columns to standard fields.
+
+CSV columns: {hdrs}
+
+Sample data (first 5 rows):
+{sample_str}
+
+Standard fields to match:
+{field_list}
+
+For each standard field, determine which CSV column (if any) maps to it.
+Only include fields where you are confident about the match.
+Do NOT map a CSV column to more than one field.
+
+Respond ONLY with a JSON object mapping field_key to column_name.
+Example: {{"loan_id": "Loan_ID", "current_balance": "Balance", "interest_rate": "Rate"}}
+No explanation, no markdown, just the JSON object."""
+
+    try:
+        import httpx
+        text = None
+
+        if openai_key:
+            # Use OpenAI
+            base_url = os.getenv("OPENAI_BASE_URL", "https://api.openai.com/v1")
+            resp = httpx.post(
+                f"{base_url}/chat/completions",
+                headers={
+                    "Authorization": f"Bearer {openai_key}",
+                    "Content-Type": "application/json",
+                },
+                json={
+                    "model": "gpt-4o",
+                    "max_tokens": 2000,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=30,
+                verify=False,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["choices"][0]["message"]["content"].strip()
+
+        elif anthropic_key:
+            # Use Anthropic
+            resp = httpx.post(
+                "https://api.anthropic.com/v1/messages",
+                headers={
+                    "x-api-key": anthropic_key,
+                    "anthropic-version": "2023-06-01",
+                    "content-type": "application/json",
+                },
+                json={
+                    "model": "claude-3-5-sonnet-20241022",
+                    "max_tokens": 2000,
+                    "messages": [{"role": "user", "content": prompt}],
+                },
+                timeout=30,
+                verify=False,
+            )
+            resp.raise_for_status()
+            data = resp.json()
+            text = data["content"][0]["text"].strip()
+
+        if not text:
+            return None
+
+        # Strip markdown fences if present
+        text = re.sub(r'^```json\s*', '', text)
+        text = re.sub(r'\s*```$', '', text)
+
+        mapping = _json.loads(text)
+
+        # Validate: only keep valid field_key -> column pairs
+        clean = {}
+        used_cols = set()
+        for fk, col in mapping.items():
+            if fk in flds and col in hdrs and col not in used_cols:
+                clean[fk] = col
+                used_cols.add(col)
+
+        return clean if clean else None
+
+    except Exception as e:
+        print(f"AI MATCH ERROR: {e}")
+        import traceback
+        traceback.print_exc()
+        return None

@@ -34,7 +34,11 @@ DATE_THRESHOLD = 0.70
 BOOL_THRESHOLD = 0.70
 DATE_LIKENESS_THRESHOLD = 0.30
 
-NULL_TOKENS = {"null", "none", "n/a", "na", "nan", "-", "--", ""}
+NULL_TOKENS = {"null", "none", "n/a", "na", "nan", "nat", "-", "--", ""}
+
+EXCEL_ERROR_PATTERN = re.compile(
+    r"^#(value!|n/a|ref!|div/0!|name[?]|num!|null!|error!)", re.I
+)
 
 TRUE_TOKENS = {"1", "true", "t", "y", "yes"}
 FALSE_TOKENS = {"0", "false", "f", "n", "no"}
@@ -124,7 +128,18 @@ def _is_null(v) -> bool:
         return True
     if isinstance(v, float) and math.isnan(v):
         return True
-    return str(v).strip().lower() in NULL_TOKENS
+    try:
+        import pandas as _pd
+        if _pd.isna(v):
+            return True
+    except Exception:
+        pass
+    s = str(v).strip().lower()
+    if s in NULL_TOKENS:
+        return True
+    if EXCEL_ERROR_PATTERN.match(s):
+        return True
+    return False
 
 
 def _parse_date(v) -> Optional[datetime]:
@@ -393,6 +408,314 @@ def detect_date_convention(series: pd.Series) -> Optional[str]:
 # MAIN: RUN ALL DQ CHECKS
 # ═══════════════════════════════════════════════════════════════
 
+
+# ═══════════════════════════════════════════════════════════════
+# KNOWN DERIVED COLUMNS AND THEIR SOURCE DEPENDENCIES
+# ═══════════════════════════════════════════════════════════════
+
+DERIVED_COLUMN_NAMES = {
+    "period_balance", "period_principal", "period_interest",
+    "period_payment", "delinquency_state", "performance_status",
+    "cumulative_loss", "prepayment_flag",
+}
+
+DERIVED_SOURCE_DEPS = {
+    "period_balance": ["current_balance"],
+    "period_principal": ["current_balance", "original_balance"],
+    "period_interest": ["interest_rate", "current_balance"],
+    "delinquency_state": ["loan_status", "days_past_due"],
+}
+
+DEFAULT_DPD_THRESHOLD = 120
+PERFORMING_DPD_THRESHOLD = 1
+HIGH_CARDINALITY_THRESHOLD = 13
+
+
+# ═══════════════════════════════════════════════════════════════
+# N1. STRUCTURAL / SCHEMA CHECKS
+# ═══════════════════════════════════════════════════════════════
+
+def check_structural(df: pd.DataFrame, mapping: dict) -> list:
+    """
+    N1 structural checks:
+    - Required columns missing
+    - All-blank mapped columns
+    - Output column collision
+    - Missing source column for derivation
+    """
+    flags = []
+    mapped_cols = set(mapping.values())
+
+    # Required columns
+    for required_field in ["loan_id", "snapshot_date"]:
+        if required_field not in mapping:
+            flags.append({
+                "flag": "MISSING_REQUIRED_COLUMN",
+                "field": required_field,
+                "column": None,
+                "detail": f"Required field '{required_field}' is not mapped",
+                "severity": "error",
+            })
+
+    # All-blank mapped columns
+    for field_key, col_name in mapping.items():
+        if col_name not in df.columns:
+            continue
+        series = df[col_name]
+        non_null = series.dropna()
+        non_null_nonempty = non_null[non_null.astype(str).str.strip() != ""]
+        if len(non_null_nonempty) == 0:
+            flags.append({
+                "flag": "ALL_BLANK_COLUMN",
+                "field": field_key,
+                "column": col_name,
+                "detail": f"Column '{col_name}' is entirely blank or null",
+                "severity": "error",
+            })
+
+    # Output column collision
+    for derived_col in DERIVED_COLUMN_NAMES:
+        if derived_col in df.columns and derived_col not in mapped_cols:
+            flags.append({
+                "flag": "OUTPUT_COLUMN_COLLISION",
+                "field": None,
+                "column": derived_col,
+                "detail": f"Derived column '{derived_col}' already exists in tape",
+                "severity": "warning",
+            })
+
+    # Missing source column for derivation
+    for derived_col, sources in DERIVED_SOURCE_DEPS.items():
+        if derived_col in df.columns:
+            continue
+        for src_field in sources:
+            if src_field not in mapping:
+                flags.append({
+                    "flag": "MISSING_SOURCE_COLUMN",
+                    "field": src_field,
+                    "column": None,
+                    "detail": f"Field '{src_field}' needed to derive '{derived_col}' is not mapped",
+                    "severity": "warning",
+                })
+
+    return flags
+
+
+# ═══════════════════════════════════════════════════════════════
+# N3. BOOLEAN EXTENDED CHECKS
+# ═══════════════════════════════════════════════════════════════
+
+BOOL_GROUP_YN = {"y", "n", "yes", "no"}
+BOOL_GROUP_10 = {"1", "0"}
+BOOL_GROUP_TF = {"true", "false", "t", "f"}
+
+
+def check_boolean_extended(series: pd.Series) -> dict:
+    """
+    N3 boolean extended checks:
+    - Mixed boolean encoding (Y/N + 1/0 + True/False simultaneously)
+    - Boolean column has nulls
+    """
+    non_null = series.dropna()
+    non_null = non_null[~non_null.apply(_is_null)]
+    vals = non_null.astype(str).str.strip().str.lower()
+
+    has_null = series.apply(_is_null).any()
+
+    groups_present = []
+    if vals.isin(BOOL_GROUP_YN).any():
+        groups_present.append("Y/N")
+    if vals.isin(BOOL_GROUP_10).any():
+        groups_present.append("1/0")
+    if vals.isin(BOOL_GROUP_TF).any():
+        groups_present.append("True/False")
+
+    mixed_encoding = len(groups_present) > 1
+
+    return {
+        "mixed_encoding": mixed_encoding,
+        "encoding_groups": groups_present,
+        "has_null": bool(has_null),
+    }
+
+
+# ═══════════════════════════════════════════════════════════════
+# N4. LOAN PERFORMANCE DOMAIN CHECKS
+# ═══════════════════════════════════════════════════════════════
+
+def check_loan_performance(
+    df: pd.DataFrame,
+    mapping: dict,
+    default_threshold: int = DEFAULT_DPD_THRESHOLD,
+    performing_threshold: int = PERFORMING_DPD_THRESHOLD,
+) -> list:
+    """
+    N4 loan performance checks (only runs if days_past_due is mapped):
+    - DPD negative values
+    - Default threshold breach (DPD >= 120)
+    - Non-performing loan flag (DPD >= 1)
+    """
+    flags = []
+
+    dpd_col = mapping.get("days_past_due")
+    if not dpd_col or dpd_col not in df.columns:
+        return flags
+
+    dpd_series = df[dpd_col].apply(_parse_numeric)
+    valid = dpd_series.dropna()
+    n = len(df)
+
+    # Negative DPD
+    neg_mask = valid < 0
+    neg_count = int(neg_mask.sum())
+    if neg_count > 0:
+        flags.append({
+            "flag": "NEGATIVE_DPD",
+            "field": "days_past_due",
+            "column": dpd_col,
+            "count": neg_count,
+            "pct": round(neg_count / n * 100, 2),
+            "detail": f"{neg_count} rows have days_past_due < 0",
+            "severity": "error",
+        })
+
+    # Default threshold breach
+    default_mask = valid >= default_threshold
+    default_count = int(default_mask.sum())
+    if default_count > 0:
+        flags.append({
+            "flag": "DEFAULT_THRESHOLD_BREACH",
+            "field": "days_past_due",
+            "column": dpd_col,
+            "count": default_count,
+            "pct": round(default_count / n * 100, 2),
+            "detail": f"{default_count} rows have days_past_due >= {default_threshold}",
+            "severity": "warning",
+        })
+
+    # Non-performing loans
+    non_perf_mask = valid >= performing_threshold
+    non_perf_count = int(non_perf_mask.sum())
+    if non_perf_count > 0:
+        flags.append({
+            "flag": "NON_PERFORMING_LOAN",
+            "field": "days_past_due",
+            "column": dpd_col,
+            "count": non_perf_count,
+            "pct": round(non_perf_count / n * 100, 2),
+            "detail": f"{non_perf_count} rows have days_past_due >= {performing_threshold}",
+            "severity": "info",
+        })
+
+    return flags
+
+
+# ═══════════════════════════════════════════════════════════════
+# N5. PANEL STRUCTURE CHECKS
+# ═══════════════════════════════════════════════════════════════
+
+def check_panel_structure(df: pd.DataFrame, mapping: dict) -> list:
+    """
+    N5 panel structure checks:
+    - Duplicate panel key (loan_id + snapshot_date)
+    - loan_status entirely missing
+    - days_past_due missing with/without fallback
+    - delinquency_state missing
+    - High cardinality for stratification
+    """
+    flags = []
+
+    loan_id_col = mapping.get("loan_id")
+    snapshot_col = mapping.get("snapshot_date")
+    dpd_col = mapping.get("days_past_due")
+    mpd_col = mapping.get("months_past_due")
+    status_col = mapping.get("loan_status")
+    delinq_col = mapping.get("delinquency_state")
+
+    # Duplicate panel key
+    if loan_id_col and snapshot_col and             loan_id_col in df.columns and snapshot_col in df.columns:
+        dupes = df.duplicated(subset=[loan_id_col, snapshot_col]).sum()
+        if dupes > 0:
+            flags.append({
+                "flag": "DUPLICATE_PANEL_KEY",
+                "field": "loan_id + snapshot_date",
+                "column": f"{loan_id_col}, {snapshot_col}",
+                "count": int(dupes),
+                "pct": round(dupes / len(df) * 100, 2),
+                "detail": f"{dupes} duplicate (loan_id, snapshot_date) pairs",
+                "severity": "error",
+            })
+
+    # loan_status entirely missing
+    if not status_col or status_col not in df.columns:
+        flags.append({
+            "flag": "MISSING_LOAN_STATUS",
+            "field": "loan_status",
+            "column": None,
+            "count": None,
+            "pct": None,
+            "detail": "loan_status field is not mapped",
+            "severity": "warning",
+        })
+
+    # days_past_due missing
+    if not dpd_col or dpd_col not in df.columns:
+        if mpd_col and mpd_col in df.columns:
+            flags.append({
+                "flag": "MISSING_DPD_FALLBACK_AVAILABLE",
+                "field": "days_past_due",
+                "column": None,
+                "count": None,
+                "pct": None,
+                "detail": f"days_past_due not mapped but months_past_due ({mpd_col}) available — DPD = MPD × 30",
+                "severity": "warning",
+            })
+        else:
+            flags.append({
+                "flag": "MISSING_DPD_NO_FALLBACK",
+                "field": "days_past_due",
+                "column": None,
+                "count": None,
+                "pct": None,
+                "detail": "days_past_due not mapped and no months_past_due fallback available",
+                "severity": "error",
+            })
+
+    # delinquency_state missing
+    if not delinq_col or delinq_col not in df.columns:
+        synthesis_note = f"loan_status ({status_col}) available for synthesis"             if status_col and status_col in df.columns else "no synthesis source available"
+        flags.append({
+            "flag": "MISSING_DELINQUENCY_STATE",
+            "field": "delinquency_state",
+            "column": None,
+            "count": None,
+            "pct": None,
+            "detail": f"delinquency_state not mapped — {synthesis_note}",
+            "severity": "warning",
+        })
+
+    # High cardinality for stratification
+    for field_key, col_name in mapping.items():
+        if col_name not in df.columns:
+            continue
+        inferred = infer_type(df[col_name], col_name)
+        if inferred in ("string", "boolean"):
+            n_distinct = df[col_name].nunique(dropna=True)
+            if n_distinct > HIGH_CARDINALITY_THRESHOLD:
+                flags.append({
+                    "flag": "HIGH_CARDINALITY_FOR_STRAT",
+                    "field": field_key,
+                    "column": col_name,
+                    "count": int(n_distinct),
+                    "pct": None,
+                    "detail": f"{n_distinct} distinct values — too many for cross-tab stratification",
+                    "severity": "info",
+                })
+
+    return flags
+
+
+
 def run_dq_checks(df: pd.DataFrame, mapping: dict) -> dict:
     """
     Run all DQ checks on mapped and unmapped columns.
@@ -445,6 +768,11 @@ def run_dq_checks(df: pd.DataFrame, mapping: dict) -> dict:
         if inferred_type == "datetime":
             date_convention = detect_date_convention(series)
 
+        # Boolean extended checks
+        bool_ext = {"mixed_encoding": False, "encoding_groups": [], "has_null": False}
+        if inferred_type == "boolean":
+            bool_ext = check_boolean_extended(series)
+
         # Build issue list for this column
         issues = []
         if missing_info["missing_pct"] > 10:
@@ -455,6 +783,10 @@ def run_dq_checks(df: pd.DataFrame, mapping: dict) -> dict:
             issues.append(f"Near-constant: {near_const['reason']}")
         if outlier_info["outliers"] > 0:
             issues.append(f"{outlier_info['outliers']} outliers detected")
+        if bool_ext["mixed_encoding"]:
+            issues.append(f"Mixed boolean encoding: {', '.join(bool_ext['encoding_groups'])}")
+        if bool_ext["has_null"]:
+            issues.append("Boolean column has nulls — unsafe for int coercion")
 
         # Overall status
         if any("missing" in i or "out-of-range" in i for i in issues):
@@ -481,6 +813,9 @@ def run_dq_checks(df: pd.DataFrame, mapping: dict) -> dict:
             "outlier_low": outlier_info["low"],
             "outlier_high": outlier_info["high"],
             "date_convention": date_convention,
+            "bool_mixed_encoding": bool_ext["mixed_encoding"],
+            "bool_encoding_groups": bool_ext["encoding_groups"],
+            "bool_has_null": bool_ext["has_null"],
             "issues": issues,
             "status": status,
         })
@@ -548,6 +883,15 @@ def run_dq_checks(df: pd.DataFrame, mapping: dict) -> dict:
     warning_cols = [r["column"] for r in results if r["status"] == "⚠️ Warning"]
     ok_cols = [r["column"] for r in results if r["status"] == "✅ OK"]
 
+    # Run new checks
+    structural_flags = check_structural(df, mapping)
+    performance_flags = check_loan_performance(df, mapping)
+    panel_flags = check_panel_structure(df, mapping)
+    all_extra_flags = structural_flags + performance_flags + panel_flags
+
+    error_flags = [f for f in all_extra_flags if f["severity"] == "error"]
+    warning_flags = [f for f in all_extra_flags if f["severity"] == "warning"]
+
     return {
         "summary": {
             "total_columns_checked": len(results),
@@ -560,7 +904,12 @@ def run_dq_checks(df: pd.DataFrame, mapping: dict) -> dict:
             "warning_count": len(warning_cols),
             "ok_count": len(ok_cols),
             "unmapped_count": len(unmapped_results),
+            "structural_errors": len(error_flags),
+            "structural_warnings": len(warning_flags),
         },
         "columns": results,
         "unmapped": unmapped_results,
+        "structural": structural_flags,
+        "performance": performance_flags,
+        "panel": panel_flags,
     }
