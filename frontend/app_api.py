@@ -1633,6 +1633,25 @@ elif page == "✅ Data Quality":
                                 context_cols.append(cn)
                         display_df = df_full.loc[mask, context_cols].reset_index()
                         display_df.rename(columns={"index": "Row #"}, inplace=True)
+
+                        # Add outlier reason column when applicable
+                        if check_type in ["Outliers", "All issues"] and selected_row["outlier_low"] is not None:
+                            lo = selected_row["outlier_low"]
+                            hi = selected_row["outlier_high"]
+
+                            def _outlier_reason(v):
+                                try:
+                                    n = float(str(v).replace(",", "").replace("$", "").strip())
+                                    if n < lo:
+                                        return f"{n:.2f} < lower bound {lo:.2f}"
+                                    if n > hi:
+                                        return f"{n:.2f} > upper bound {hi:.2f}"
+                                except Exception:
+                                    pass
+                                return "Missing / non-numeric"
+
+                            display_df["Outlier Reason"] = df_full.loc[mask, col_name].apply(_outlier_reason).values
+
                         st.dataframe(display_df, use_container_width=True, hide_index=True,
                                      height=min(400, len(display_df) * 35 + 45))
                 else:
